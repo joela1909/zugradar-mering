@@ -101,7 +101,7 @@ async function selectTrip(id, fit) {
   if (!dep) { S.tr = null; map.getSource('rail').setData(emptyFC); render(); return; }
   try {
     const t = S.live ? await api.trip(id, S.station) : await S.demo.trip(id);
-    const stopIdx = t.stopovers.findIndex(s => (S.station.id && s.id === S.station.id) || /St\.? ?Afra/i.test(s.name));
+    const stopIdx = t.stopovers.findIndex(s => (S.station.id && s.id === S.station.id) || /afra/i.test(s.name));
     S.tr = { ...prepare(t.stopovers, t.polyline), raw: t, dep, stopIdx };
     const worst = Math.max(0, ...t.stopovers.map(s => s.arrDelay ?? s.depDelay ?? 0));
     const color = worst >= 5 ? '#dc2626' : worst >= 1 ? '#ea580c' : '#e30613';

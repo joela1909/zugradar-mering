@@ -20,7 +20,7 @@ async function cached(key, ttl, fn) {
 
 async function db(env, path, ttl) {
   if (!env.DB_CLIENT_ID || !env.DB_API_KEY) throw new ApiError('DB_CLIENT_ID / DB_API_KEY fehlen (Worker-Secrets)', 500);
-  return cached('db:' + path, ttl, async () => {
+  return cached('db2:' + path, ttl, async () => {
     const r = await fetch(BASE + path, { headers: { 'DB-Client-Id': env.DB_CLIENT_ID, 'DB-Api-Key': env.DB_API_KEY, accept: 'application/xml', 'user-agent': UA } });
     if (r.status === 404) return '<timetable/>'; // z. B. Stunde ohne Daten
     if (!r.ok) throw new ApiError(`Bahn-API ${r.status} ${path.split('/')[1]} ${(await r.text()).slice(0, 80)}`);
@@ -28,7 +28,7 @@ async function db(env, path, ttl) {
   });
 }
 
-const station = async (env, pattern) => parseStations(await db(env, '/station/' + encodeURIComponent(pattern), 86400));
+const station = async (env, pattern) => parseStations(await db(env, '/station/' + encodeURIComponent(pattern), 3600));
 const plan = async (env, eva, date) => parseTimetable(await db(env, `/plan/${eva}/${planPath(date)}`, 300));
 const changes = async (env, eva) => parseTimetable(await db(env, `/fchg/${eva}`, 30));
 
@@ -57,10 +57,20 @@ async function locateAddress(query) {
 }
 
 async function locations(env, q) {
-  const list = await station(env, q.get('query') || '');
-  const out = [];
-  for (const s of list.slice(0, Number(q.get('results')) || 5)) out.push({ type: 'stop', id: s.eva, name: s.name, location: await locate(s.name).catch(() => null) });
-  return out.filter(s => s.location);
+  const query = (q.get('query') || '').trim();
+  const words = query.toLowerCase().split(/[\s.-]+/).filter(Boolean);
+  const variants = [...new Set([query, query.replace(/\s+/g, '-'), query.replace(/\bSt\.?\s*/i, 'St. '), words.slice(0, 2).join(' '), words[0]].filter(Boolean))];
+  const tried = [], found = new Map();
+  for (const v of variants) {
+    const list = await station(env, v).catch(e => { tried.push(`${v}: ${e.message}`); return []; });
+    tried.push(`${v}: ${list.length}`);
+    for (const st of list) found.set(st.eva, st);
+    if ([...found.values()].some(st => words.every(w => st.name.toLowerCase().includes(w)))) break;
+  }
+  const rank = st => words.filter(w => st.name.toLowerCase().includes(w)).length;
+  const best = [...found.values()].sort((a, b) => rank(b) - rank(a)).slice(0, Number(q.get('results')) || 5);
+  if (!best.length) throw new ApiError('Keine Station gefunden (' + tried.join(' | ') + ')', 404);
+  return Promise.all(best.map(async st => ({ type: 'stop', id: st.eva, name: st.name, location: await locate(st.name).catch(() => ({ latitude: BIAS.lat, longitude: BIAS.lon })) })));
 }
 
 async function departures(env, eva, q) {
