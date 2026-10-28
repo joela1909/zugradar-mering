@@ -78,3 +78,50 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;border
 .tklabels{position:relative;height:12px;margin:3px 0 -2px}.tklabels span{position:absolute;transform:translateX(-50%);font-size:9.5px;color:var(--mute);white-space:nowrap;letter-spacing:-.01em}
 .fabs #d3{font-size:13px;font-weight:700;letter-spacing:-.01em;color:var(--mute)}.fabs #d3.on{color:var(--blue)}
 .lbl.train-l[data-livery=db]{background:#ec0016}.lbl.train-l[data-livery=arverio]{background:#0b5fb3}.lbl.train-l[data-livery=db] b,.lbl.train-l[data-livery=arverio] b{color:#fff;opacity:.9}
+
+/* ===== Apple-Karten-Gefühl (Apple-Design-Skill): ruhig, SF, Glas, hell/dunkel ===== */
+:root{--land:#f3f1ed;--card:rgba(255,255,255,.78);--sep:rgba(60,60,67,.18)}
+@media (prefers-color-scheme:dark){:root{--land:#242426;--card:rgba(36,36,38,.78);--sep:rgba(235,235,245,.16)}html,body{background:#1c1c1e}}
+html,body{background:var(--land)}
+.glass{background:var(--card);backdrop-filter:blur(40px) saturate(1.9);-webkit-backdrop-filter:blur(40px) saturate(1.9);border:.5px solid var(--sep);box-shadow:0 10px 40px rgba(0,0,0,.18),0 1px 3px rgba(0,0,0,.06)}
+.fabs{border-radius:14px;padding:0;overflow:hidden}
+.fabs button{width:46px;height:46px;border-radius:0;display:grid;place-items:center;font-size:14px;color:var(--ink)}
+.fabs button+button{border-top:.5px solid var(--sep)}
+.fabs svg{fill:none;stroke:currentColor;stroke-width:1.8}
+.fabs #gps.on{color:var(--blue)}.fabs #gps.on svg{fill:currentColor}
+.fabs #d3{font-weight:700;letter-spacing:-.01em;color:var(--mute)}.fabs #d3.on{color:var(--blue)}
+.dirctl{background:var(--card);padding:2px}
+.dirctl button{padding:7px 15px}
+.status{padding:5px 11px}
+.tag{border-radius:28px;padding:20px 18px 14px}
+.tag::before{content:"";position:absolute;top:7px;left:50%;width:36px;height:5px;margin-left:-18px;border-radius:3px;background:var(--sep)}
+.tag .row.top{margin-top:2px}
+.badge{border-radius:8px}
+.times .big{font-size:44px;font-weight:700;letter-spacing:-.045em}
+.board{border-radius:28px}
+.brow{border-radius:16px}
+/* Beschriftungen auf der Karte */
+.lbl{background:rgba(255,255,255,.9);box-shadow:0 1px 6px rgba(0,0,0,.14)}
+.pin{background:rgba(29,29,31,.9)}
+.me{background:#fff}
+@media (prefers-color-scheme:dark){
+  .lbl{background:rgba(58,58,60,.92);color:#f5f5f7;box-shadow:0 1px 8px rgba(0,0,0,.5)}
+  .lbl .ontime{color:#30d158}.lbl .minor{color:#ff9f0a}.lbl .late{color:#ff453a}
+  .lbl.route{background:#0a84ff}
+  .pin{background:rgba(72,72,74,.92)}
+  .me{background:#3a3a3c;color:#f5f5f7}
+  .dot{background:#1c1c1e;border-color:#f5f5f7}
+  .dot.station{background:#f5f5f7;border-color:#1c1c1e}
+  .gps{border-color:#1c1c1e}
+  .maplibregl-ctrl-attrib{background:rgba(28,28,30,.6)!important;color:#98989d!important}.maplibregl-ctrl-attrib a{color:#98989d!important}
+}
+/* Fortschrittsbalken: Halte als Punkte */
+.pbar{height:44px;align-items:flex-start;padding:9px 12px 0;border-radius:14px}
+.pbar .base{position:absolute;left:10px;right:10px;bottom:11px;height:2px;border-radius:1px;background:var(--sep);z-index:0}
+.pbar .tk{position:absolute;top:auto;bottom:7.5px;width:9px;height:9px;margin-left:-4.5px;border-radius:50%;background:var(--card);border:2px solid var(--mute);opacity:1;z-index:1}
+.pbar .tk.p{background:var(--ink);border-color:var(--ink)}
+.pbar .tk.start{width:9px;height:9px}
+.pbar .tk.end{width:13px;height:13px;margin-left:-6.5px;bottom:5.5px;border:3px solid var(--ink);background:var(--card)}
+.pbar .tk.end.p{background:var(--ink)}
+.pbar i{border-right-width:0;border-radius:14px 0 0 14px}
+.tklabels{margin:4px 0 -2px}

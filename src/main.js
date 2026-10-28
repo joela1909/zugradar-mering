@@ -33,6 +33,39 @@ const mapReady = new Promise(r => {
   map.on('error', e => { if (!done && !map.isStyleLoaded()) { console.warn('Kartenstil nicht ladbar', e.error); map.setStyle(BLANK); map.once('styledata', go); } });
 });
 
+
+// ---- Kartenfarben im Apple-Karten-Stil (hell/dunkel) ----
+const PALETTE = {
+  light: { land: '#f3f1ed', urban: '#ece8e1', water: '#b3d3ea', park: '#d4e8c3', building: '#e4dfd6', road: '#ffffff', casing: '#dbd6cd', motor: '#fbe3a6', motorCasing: '#e2b95f', rail: '#cfc9bf', boundary: '#cfc9bf', text: '#3a3a3c', halo: 'rgba(255,255,255,.85)', b3d: ['#ebe7df', '#e0dbd2', '#d3cec5'], railCase: '#ffffff' },
+  dark: { land: '#242426', urban: '#2a2a2c', water: '#1f3b54', park: '#223a2b', building: '#323235', road: '#434347', casing: '#1b1b1d', motor: '#6e5b32', motorCasing: '#3c3220', rail: '#4b4b4f', boundary: '#4b4b4f', text: '#d6d6db', halo: 'rgba(28,28,30,.85)', b3d: ['#3a3a3e', '#323236', '#2a2a2e'], railCase: '#1c1c1e' },
+};
+const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+function applyTheme() {
+  const P = PALETTE[darkQuery.matches ? 'dark' : 'light'], set = (id, prop, v) => { try { map.setPaintProperty(id, prop, v); } catch {} };
+  let layers = []; try { layers = map.getStyle().layers; } catch { return; }
+  for (const l of layers) {
+    const id = l.id, t = l.type;
+    if (['rail', 'walk', 'buildings-3d'].includes(l.source) || l.type === 'custom' || id.startsWith('rail') || id.startsWith('walk') || id === 'buildings-3d') continue;
+    if (t === 'background') set(id, 'background-color', P.land);
+    else if (t === 'fill') {
+      if (/water/.test(id)) set(id, 'fill-color', P.water);
+      else if (/park|wood|forest|grass|green|garden|farm|meadow|nature|cemetery|golf|pitch|scrub/.test(id)) set(id, 'fill-color', P.park);
+      else if (/building/.test(id)) { set(id, 'fill-color', P.building); set(id, 'fill-outline-color', P.casing); }
+      else if (/landuse|residential|suburb|commercial|industrial|neighbo|urban|aeroway|airport|pedestrian/.test(id)) set(id, 'fill-color', P.urban);
+    } else if (t === 'line') {
+      if (/waterway|river|stream|canal/.test(id)) set(id, 'line-color', P.water);
+      else if (/motorway|trunk/.test(id)) set(id, 'line-color', /casing/.test(id) ? P.motorCasing : P.motor);
+      else if (/casing/.test(id)) set(id, 'line-color', P.casing);
+      else if (/highway|road|street|primary|secondary|tertiary|minor|service|path|track|bridge|tunnel/.test(id)) set(id, 'line-color', P.road);
+      else if (/rail|transit/.test(id)) set(id, 'line-color', P.rail);
+      else if (/boundary|admin/.test(id)) set(id, 'line-color', P.boundary);
+    } else if (t === 'symbol') { set(id, 'text-color', P.text); set(id, 'text-halo-color', P.halo); set(id, 'text-halo-width', 1.3); }
+  }
+  set('walk-case', 'line-color', P.railCase); set('rail-case', 'line-color', P.railCase);
+  set('buildings-3d', 'fill-extrusion-color', ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 6], 0, P.b3d[0], 30, P.b3d[1], 80, P.b3d[2]]);
+}
+darkQuery.addEventListener?.('change', applyTheme);
+
 const train3d = createTrainLayer(maplibregl);
 const emptyFC = { type: 'FeatureCollection', features: [] };
 const lineFeat = (c, p = {}) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: c }, properties: p });
@@ -66,6 +99,7 @@ async function ensureLayers() {
   map.addLayer({ id: 'rail', type: 'line', source: 'rail', paint: { 'line-color': ['get', 'color'], 'line-width': 3.4 } });
   map.addLayer({ id: 'rail-ties', type: 'line', source: 'rail', paint: { 'line-color': '#fff', 'line-width': 1.4, 'line-dasharray': [1, 3] } });
   map.addLayer(train3d.layer);
+  applyTheme();
 }
 const shortName = n => n.replace(/\s*\(b [^)]*\)/, '').replace(/^Augsburg[ -](?!Hbf)/, '').replace(/^München[ -](?!Hbf)/, '');
 const el = (cn, html) => { const e = document.createElement('div'); e.className = cn; e.innerHTML = html; return e; };
@@ -272,12 +306,13 @@ function renderBoard(list, i, dep, p) {
 }
 
 function bar(icon, left, right, frac, tone, ticks = []) {
-  const w = Math.round(frac * 100), px = Math.max(240, ($('tag').clientWidth || 360) - 32);
-  const lines = ticks.map(t => `<b class="tk${t.f <= frac ? ' p' : ''}" style="left:${(t.f * 100).toFixed(1)}%"></b>`).join('');
+  const px = Math.max(240, ($('tag').clientWidth || 360) - 32), pos = f => `calc(10px + (100% - 20px) * ${f.toFixed(4)})`;
+  const dot = (f, cls) => `<b class="tk ${cls}" style="left:${pos(f)}"></b>`;
+  const dots = ticks.length || frac != null ? [dot(0, 'start p'), ...ticks.map(t => dot(t.f, t.f <= frac ? 'p' : '')), dot(1, 'end' + (frac >= 1 ? ' p' : ''))].join('') : '';
   let last = -99;
   const names = ticks.filter(t => { const x = t.f * px; if (t.f < .14 || t.f > .86 || x - last < 56) return false; last = x; return true; })
-    .map(t => `<span style="left:${(t.f * 100).toFixed(1)}%">${shortName(t.name).slice(0, 13)}</span>`).join('');
-  return `<div class="pbar t-${tone}"><i style="width:${w}%${w ? '' : ';border-right-width:0'}"></i>${lines}<span class="pl1">${icon} ${left}</span><span class="pr1">${right}</span></div>${names ? `<div class="tklabels">${names}</div>` : ''}`;
+    .map(t => `<span style="left:${pos(t.f)}">${shortName(t.name).slice(0, 13)}</span>`).join('');
+  return `<div class="pbar t-${tone}"><i style="width:${frac > 0 ? pos(frac) : '0px'}"></i><u class="base"></u>${dots}<span class="pl1">${icon} ${left}</span><span class="pr1">${right}</span></div>${names ? `<div class="tklabels">${names}</div>` : ''}`;
 }
 function trainStops(dep, tStart, tEnd) {
   const raw = S.tr.raw.stopovers, idx = S.tr.stopIdx;
