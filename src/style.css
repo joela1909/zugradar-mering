@@ -26,3 +26,5 @@ button{font:inherit;color:inherit;border:0;background:var(--line);border-radius:
 .pin{padding:6px 10px;border-radius:99px;background:#0e1a24;color:#fff;font-weight:700;font-size:12px;border:2px solid #fff;box-shadow:0 4px 12px rgba(0,0,0,.3);white-space:nowrap}
 .me{width:16px;height:16px;border-radius:50%;background:#2563eb;border:3px solid #fff;box-shadow:0 0 0 6px rgba(37,99,235,.25)}
 @media(min-width:900px){.panel,.top{left:20px}}
+.err{font-size:11px;color:var(--bad);max-width:250px;word-break:break-all;line-height:1.2}
+.top{border-radius:22px}

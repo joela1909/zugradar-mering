@@ -72,7 +72,7 @@ async function refresh() {
       S.live = false; S.demo = api.demo(); S.station = S.demo.station; S.deps = S.demo.deps;
     }
     $('mode').textContent = S.live ? 'LIVE' : 'DEMO'; $('mode').className = 'chip' + (S.live ? ' live' : '');
-    $('stName').textContent = S.station.name; placeStation();
+    $('err').textContent = S.live ? '' : liveError; $('stName').textContent = S.station.name; placeStation();
     if (!S.sel || !S.deps.find(d => d.tripId === S.sel)) S.sel = (S.deps.find(d => addMin(d.actual || d.planned, 1) > new Date() && !d.cancelled) || S.deps[0])?.tripId;
     renderList();
     await selectTrip(S.sel, false);
