@@ -56,3 +56,12 @@ export function stopFractions(names, times, tStart, tEnd) {
   }
   return out.map((o, i, arr) => ({ ...o, f: Math.max(o.f, i ? arr[i - 1].f : 0) })).filter(o => o.f > 0.02 && o.f < 0.98);
 }
+
+const DB_CATEGORIES = /^(RE|RB|IRE|IC|ICE|EC|ECE|S|RJ|RJX|NJ|FLX|TGV)$/i;
+/** Zug-Lackierung nach Betreiber: 'arverio' (blau), 'db' (rot) oder 'other' (neutral). */
+export function livery(dep) {
+  const cat = (dep.category || '').trim(), name = (dep.line || '').trim();
+  if (/^ARV$/i.test(cat) || /^ARV\b/i.test(name)) return 'arverio';
+  if (DB_CATEGORIES.test(cat) || (!cat && /^(RE|RB|IRE|IC|ICE|S)\b/i.test(name))) return 'db';
+  return 'other';
+}

@@ -33,6 +33,8 @@ export function buildTrain() {
 }
 
 /** Benutzerdefinierte MapLibre-Ebene: ein 3D-Zug an einer Position, in Fahrtrichtung gedreht. */
+const LIVERY = { db: 0xec0016, arverio: 0x0b5fb3, other: 0x6e6e73 };
+
 export function createTrainLayer(maplibregl) {
   const TRAIN_LENGTH = 74, TRAIN_WIDTH = 2.9, TARGET_PX = 64, TARGET_WIDTH_PX = 15; // Modelllänge in m, gewünschte Mindestlänge auf dem Bildschirm
   const state = { lonlat: null, bearing: 0, visible: true };
@@ -63,5 +65,6 @@ export function createTrainLayer(maplibregl) {
       this.renderer.render(this.scene, this.camera);
     },
   };
-  return { layer, state };
+  const setLivery = name => { const c = LIVERY[name] ?? LIVERY.other; if (state.livery !== name) { state.livery = name; M.red.color.set(c); M.roof.color.set(c); } };
+  return { layer, state, setLivery };
 }

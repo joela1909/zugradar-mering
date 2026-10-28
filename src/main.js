@@ -6,7 +6,7 @@ import { prepare, positionAt } from './train.js';
 import { expectedDelay, record, histKey } from './predict.js';
 import { dist } from './geo.js';
 import { createTrainLayer } from './train3d.js';
-import { dirOf, matchesDir, startName, timeProgress, distProgress, minutesUntil, buffer, stopFractions } from './progress.js';
+import { dirOf, matchesDir, startName, timeProgress, distProgress, minutesUntil, buffer, stopFractions, livery } from './progress.js';
 
 const HOME_ADDRESS = 'Koloniestraße 26, 86399 Bobingen';
 const HOME_FALLBACK = [10.8330, 48.2730]; // Bobingen (Mitte), falls die Adressuche nicht klappt
@@ -349,10 +349,11 @@ function tick() {
   const d = S.tr.dep.delay ?? 0, html = `${S.tr.dep.line}${d >= 1 ? ` <b>+${Math.round(d)}</b>` : ''}`;
   if (!S.trainMarker) S.trainMarker = new maplibregl.Marker({ element: el('trainmodel', TRAIN_SVG), anchor: 'center', rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat(pos).addTo(map);
   S.trainMarker.setLngLat(pos).setRotation(p.bearing || 0);
+  const lv = livery(S.tr.dep); train3d.setLivery(lv);
   train3d.state.lonlat = pos; train3d.state.bearing = p.bearing || 0; syncTrainLook();
   if (!S.trainLabel) { S.trainLabel = mk(el('lbl train-l', html), pos); labels.push({ marker: S.trainLabel, ll: pos, prio: 0, essential: true, trainLabel: true }); }
   const it = labels.find(l => l.trainLabel); if (it) it.ll = pos;
-  S.trainLabel.setLngLat(pos); S.trainLabel.getElement().innerHTML = html;
+  S.trainLabel.setLngLat(pos); S.trainLabel.getElement().innerHTML = html; S.trainLabel.getElement().dataset.livery = lv;
   layout(); fillProg();
 }
 

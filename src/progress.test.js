@@ -44,3 +44,13 @@ test('Halte im Balken', () => {
   assert.equal(r[2].f, .6); assert.equal(r[3].f, .8); assert.ok(r[0].f > 0 && r[0].f < r[1].f && r[1].f < .6);
   assert.deepEqual(stopFractions([], new Map(), 0, 100), []);
 });
+
+import { livery } from './progress.js';
+test('Lackierung', () => {
+  assert.equal(livery({ category: 'ARV', line: 'ARV RE9' }), 'arverio');
+  assert.equal(livery({ line: 'ARV RB86' }), 'arverio');
+  assert.equal(livery({ category: 'RE', line: 'RE 9' }), 'db');
+  assert.equal(livery({ line: 'RB 86' }), 'db');
+  assert.equal(livery({ category: 'ICE', line: 'ICE 1' }), 'db');
+  assert.equal(livery({ category: 'BRB', line: 'BRB RB67' }), 'other');
+});
