@@ -4,7 +4,7 @@ import { profile as dbnav } from 'db-vendo-client/p/dbnav/index.js';
 const UA = 'zugradar-mering (privates Hobbyprojekt)';
 const UPSTREAM = 'https://v6.db.transport.rest';
 let client;
-const getClient = () => (client ||= createClient(dbnav, UA));
+const getClient = () => (client ||= createClient(dbnav, UA, { enrichStations: false }));
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=15' } });
 const num = (v, d) => (v == null || v === '' ? d : Number(v));
@@ -32,7 +32,7 @@ export default {
     const path = url.pathname.slice(4);
     const errors = [];
     for (const [name, fn] of [['vendo', () => viaVendo(path, url.searchParams)], ['transport.rest', () => viaTransportRest(path, url.search)]]) {
-      try { return await fn(); } catch (e) { errors.push(`${name}: ${String(e?.message || e).slice(0, 100)}`); }
+      try { return await fn(); } catch (e) { console.error(name, e?.stack); errors.push(`${name}: ${String(e?.message || e).slice(0, 100)}`); }
     }
     return json({ error: 'Alle Quellen fehlgeschlagen', detail: errors.join(' | ') }, 502);
   },
