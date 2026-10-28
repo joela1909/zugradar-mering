@@ -15,3 +15,7 @@ Mering St Afra, Zugstrecke samt Live-Position und Weg (zu Fuß/Rad/Auto) zum Bah
 Build command `npm run build`, Output `dist`, Deploy command `npx wrangler deploy` (Konfiguration: `wrangler.jsonc`).
 
 _Build-Trigger 2026-10-28_
+
+## Koordinaten
+
+Bahnhofskoordinaten stammen aus `stations.json` (erzeugt mit `node scripts/build-stations.mjs` aus dem npm-Paket `db-stations`; Daten: Deutsche Bahn StaDa, CC BY 4.0). Mering-St Afra hat eine feste, manuell geprüfte Kartenposition (`OVERRIDES` in `worker.js`). Nur unbekannte Orte werden per Photon/OSM gesucht.

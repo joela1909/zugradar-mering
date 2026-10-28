@@ -46,6 +46,7 @@ async function ensureLayers() {
   map.addLayer({ id: 'rail', type: 'line', source: 'rail', paint: { 'line-color': ['get', 'color'], 'line-width': 3.4 } });
   map.addLayer({ id: 'rail-ties', type: 'line', source: 'rail', paint: { 'line-color': '#fff', 'line-width': 1.4, 'line-dasharray': [1, 3] } });
 }
+const shortName = n => n.replace(/\s*\(b [^)]*\)/, '').replace(/^Augsburg[ -](?!Hbf)/, '').replace(/^München[ -](?!Hbf)/, '');
 const el = (cn, html) => { const e = document.createElement('div'); e.className = cn; e.innerHTML = html; return e; };
 const mk = (element, ll) => new maplibregl.Marker({ element, anchor: 'center' }).setLngLat(ll).addTo(map);
 
@@ -76,9 +77,9 @@ function layout() {
   const items = labels.filter(l => l.marker.getElement().isConnected).sort((a, b) => a.prio - b.prio);
   for (const it of items) {
     const el = it.marker.getElement(); el.style.display = '';
-    const { x, y } = map.project(it.ll), w = el.offsetWidth + 8, h = el.offsetHeight + 8, gx = w / 2 + 6, gy = h / 2 + 6;
+    const { x, y } = map.project(it.ll), w = el.offsetWidth + 6, h = el.offsetHeight + 6, gx = w / 2 + 3, gy = h / 2 + 3;
     const dirs = [[0, -1], [0, 1], [1, 0], [-1, 0], [.8, -.8], [-.8, -.8], [.8, .8], [-.8, .8]];
-    const cands = it.fixed ? [[0, 0]] : [1, 1.6, 2.4].flatMap(k => dirs.map(([a, b]) => [a * gx * k, b * gy * k]));
+    const cands = it.fixed ? [[0, 0]] : [1, 1.3, 1.7].flatMap(k => dirs.map(([a, b]) => [a * gx * k, b * gy * k]));
     const free = (o, obstacles) => !obstacles.some(r => hit(r, rect(x + o[0], y + o[1], w, h)));
     const lineObs = [...rail, ...(it.onWalk ? [] : walk)];
     let pick = cands.find(o => free(o, placed) && free(o, lineObs));
@@ -161,7 +162,7 @@ async function selectTrip(id, fit) {
     t.stopovers.forEach((s, i) => {
       if (i === stopIdx || dist(s.lonlat, S.station.lonlat) < 900) return;
       const d = s.arrDelay ?? s.depDelay ?? 0, tm = s.arr || s.dep;
-      const e = el('lbl', `${s.name}<br><i class="${cls(d)}">${fmt(tm)}${d >= 1 ? ' +' + Math.round(d) : ''}</i>`);
+      const e = el('lbl', `${shortName(s.name)}<br><i class="${cls(d)}">${fmt(tm)}${d >= 1 ? ' +' + Math.round(d) : ''}</i>`);
       S.markers.push(reg(mk(e, s.lonlat), s.lonlat, 5, { stop: true }));
       S.markers.push(mk(el('dot', ''), s.lonlat)); dots.push(s.lonlat);
     });

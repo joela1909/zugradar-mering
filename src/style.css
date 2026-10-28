@@ -72,3 +72,4 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;border
 .pbar.t-me i{background:color-mix(in srgb,var(--blue) 28%,transparent);border-right-color:var(--blue)}
 .pbar span{position:relative;z-index:1;white-space:nowrap}.pbar .pl1{font-weight:600}.pbar .pr1{color:var(--mute);overflow:hidden;text-overflow:ellipsis}.pbar .pr1 b{color:var(--ink);font-weight:600}.pbar .pr1 .ontime{color:var(--ok)}.pbar .pr1 .late{color:var(--bad)}
 .dot.station{width:16px;height:16px;background:#1d1d1f;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+.lbl{max-width:112px;white-space:normal;line-height:1.15}.lbl.route,.lbl.train-l{white-space:nowrap;max-width:none}

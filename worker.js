@@ -1,3 +1,4 @@
+import stations from './stations.json';
 import { parseTime, parseTimetable, parseStations, merge, toDepartures, toStopover, planPath, addHours, tripKey, splitPath } from './iris.js';
 
 const BASE = 'https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1';
@@ -35,10 +36,16 @@ const changes = async (env, eva) => parseTimetable(await db(env, `/fchg/${eva}`,
 // Feste Kartenposition für Mering-St Afra (nur Darstellung, Fahrplan- und GPS-Daten bleiben unverändert)
 const OVERRIDES = [[/^Mering[- ]St\.? ?Afra/i, { latitude: 48.2740395, longitude: 10.9714372 }]];
 
-// Koordinaten per Ortssuche (Photon/OSM), 30 Tage gemerkt
-async function locate(name) {
-  const fixed = OVERRIDES.find(([re]) => re.test(name));
-  if (fixed) return fixed[1];
+// Koordinaten aus den Stationsdaten der Bahn (EVA bzw. Name), sonst Ortssuche
+const norm = n => n.toLowerCase().replace(/[^a-zäöüß0-9]/g, '');
+const byEva = new Map(stations.map(([eva, , lat, lon]) => [eva, { latitude: lat, longitude: lon }]));
+const byName = new Map(stations.map(([, name, lat, lon]) => [norm(name), { latitude: lat, longitude: lon }]));
+const known = (name, eva) => OVERRIDES.find(([re]) => re.test(name))?.[1] || (eva && byEva.get(eva)) || byName.get(norm(name)) || null;
+
+// Koordinaten per Ortssuche (Photon/OSM), 30 Tage gemerkt – nur für unbekannte Orte
+async function locate(name, eva) {
+  const fixed = known(name, eva);
+  if (fixed) return fixed;
   const text = await cached('geo:' + name, 2592000, async () => {
     for (const q of [`${name} Bahnhof`, name]) {
       const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=1&lang=de&lat=${BIAS.lat}&lon=${BIAS.lon}`, { headers: { 'user-agent': UA } });
@@ -75,7 +82,7 @@ async function locations(env, q) {
   const rank = st => words.filter(w => st.name.toLowerCase().includes(w)).length;
   const best = [...found.values()].sort((a, b) => rank(b) - rank(a)).slice(0, Number(q.get('results')) || 5);
   if (!best.length) throw new ApiError('Keine Station gefunden (' + tried.join(' | ') + ')', 404);
-  return Promise.all(best.map(async st => ({ type: 'stop', id: st.eva, name: st.name, location: await locate(st.name).catch(() => ({ latitude: BIAS.lat, longitude: BIAS.lon })) })));
+  return Promise.all(best.map(async st => ({ type: 'stop', id: st.eva, name: st.name, location: await locate(st.name, st.eva).catch(() => ({ latitude: BIAS.lat, longitude: BIAS.lon })) })));
 }
 
 async function departures(env, eva, q) {
@@ -97,7 +104,7 @@ async function trip(env, tripId) {
   const key = tripKey(id);
   const find = async (name, hourShifts, noLoc = false) => {
     const list = await station(env, name), s = list.find(x => x.name === name) || list[0]; if (!s) return null;
-    const location = noLoc ? null : await locate(s.name).catch(() => null); if (!noLoc && !location) return null;
+    const location = noLoc ? null : await locate(s.name, s.eva).catch(() => null); if (!noLoc && !location) return null;
     for (const sh of hourShifts) {
       const hit = (await plan(env, s.eva, addHours(base, sh))).find(x => tripKey(x.id) === key);
       if (hit) return toStopover(s.name, s.eva, location, merge([hit], await changes(env, s.eva))[0]);
@@ -106,7 +113,7 @@ async function trip(env, tripId) {
   };
   const beforeStops = await Promise.all(before.map(n => find(n, [0, -1])));
   const afterStops = await Promise.all(after.map(n => find(n, [0, 1])));
-  const here1 = toStopover(ownName, eva, await locate(ownName), own);
+  const here1 = toStopover(ownName, eva, await locate(ownName, eva), own);
   const stopovers = [...beforeStops, here1, ...afterStops].filter(Boolean);
   // Startbahnhof (Augsburg/München Hbf) für den Fortschrittsbalken, nur Zeiten, keine Koordinaten
   const allBefore = splitPath(own.ar?.ppth);
