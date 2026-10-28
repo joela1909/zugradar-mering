@@ -34,7 +34,7 @@ export function buildTrain() {
 
 /** Benutzerdefinierte MapLibre-Ebene: ein 3D-Zug an einer Position, in Fahrtrichtung gedreht. */
 export function createTrainLayer(maplibregl) {
-  const TRAIN_LENGTH = 74, TRAIN_WIDTH = 2.9, TARGET_PX = 64, TARGET_WIDTH_PX = 15; // Modelllänge in m, gewünschte Mindestlänge auf dem Bildschirm
+  const TRAIN_LENGTH = 74, TRAIN_WIDTH = 2.9, TARGET_PX = 64, TARGET_WIDTH_PX = 21, MIN_WIDEN = 1.4; // Modelllänge in m, gewünschte Mindestlänge auf dem Bildschirm
   const state = { lonlat: null, bearing: 0, visible: true };
   const layer = {
     id: 'train3d', type: 'custom', renderingMode: '3d',
@@ -57,7 +57,7 @@ export function createTrainLayer(maplibregl) {
       const model = new THREE.Matrix4().makeTranslation(mc.x, mc.y, mc.z)
         .multiply(new THREE.Matrix4().makeScale(unit, -unit, unit))
         .multiply(new THREE.Matrix4().makeRotationZ(-state.bearing * Math.PI / 180))
-        .multiply(new THREE.Matrix4().makeScale(Math.max(1, TARGET_WIDTH_PX * mpp / TRAIN_WIDTH), Math.max(1, TARGET_PX * mpp / TRAIN_LENGTH), Math.max(1, TARGET_WIDTH_PX * mpp / TRAIN_WIDTH)));
+        .multiply(new THREE.Matrix4().makeScale(Math.max(MIN_WIDEN, TARGET_WIDTH_PX * mpp / TRAIN_WIDTH), Math.max(1, TARGET_PX * mpp / TRAIN_LENGTH), Math.max(MIN_WIDEN, TARGET_WIDTH_PX * mpp / TRAIN_WIDTH)));
       this.camera.projectionMatrix = new THREE.Matrix4().fromArray(args.defaultProjectionData?.mainMatrix ?? args.modelViewProjectionMatrix).multiply(model);
       this.renderer.resetState();
       this.renderer.render(this.scene, this.camera);
