@@ -157,6 +157,11 @@ function render() {
     <div><span>Abfahrt planmäßig / aktuell</span><span>${fmt(p.plannedDep)} / <b>${fmt(dep.actual || dep.planned)}</b></span></div>
     <div><span>Prognose-Basis</span><span>${p.e.basis}</span></div>
     <div><span>Halte bis hier</span><span>${p.stopsAway}</span></div>` : ''}
+    ${dep.trainNo ? `<div><span>Zug</span><span>${dep.category || ''} ${dep.trainNo}</span></div>` : ''}
+    ${dep.plannedPlatform && dep.platform !== dep.plannedPlatform ? `<div><span>Gleiswechsel</span><span class="late">Gl. ${dep.platform} statt ${dep.plannedPlatform}</span></div>` : ''}
+    ${dep.origin ? `<div><span>Von → Nach</span><span>${dep.origin} → ${dep.direction}</span></div>` : ''}
+    ${dep.previousStops.length || dep.nextStops.length ? `<div><span>Verlauf</span><span style="text-align:right;max-width:68%">${[...dep.previousStops.slice(-3), '<b>Mering St Afra</b>', ...dep.nextStops].join(' › ')}</span></div>` : ''}
+    ${S.deps.slice(i + 1, i + 3).length ? `<div><span>Danach</span><span style="text-align:right">${S.deps.slice(i + 1, i + 3).map(n => `${fmt(n.actual || n.planned)} ${n.line}${n.delay >= 1 ? ' +' + Math.round(n.delay) : ''}`).join(' · ')}</span></div>` : ''}
     <div><span>Verkehrsmittel zum Bahnhof</span><span><button id="modebtn" style="background:var(--line);padding:2px 10px">${MODES[S.mode][0]} ${MODES[S.mode][1]} ⇄</button></span></div>
     <div><span>Startpunkt</span><span>Koloniestraße 26, Bobingen</span></div>
     <div><span>Quelle</span><span>${S.live ? 'DB Live' : 'Demo'}</span></div>

@@ -21,7 +21,8 @@ export async function geocode(q) { const r = await j(`${BASE}/geocode?q=${encode
 export async function departures(station) {
   const r = await j(`${BASE}/stops/${station.id}/departures?duration=150&results=14&language=de&remarks=false`);
   return r.departures.map(d => ({
-    tripId: d.tripId, line: d.line?.name || '?', direction: d.direction || '', platform: d.platform || d.plannedPlatform || '–',
+    tripId: d.tripId, line: d.line?.name || '?', direction: d.direction || '', platform: d.platform || d.plannedPlatform || '–', plannedPlatform: d.plannedPlatform || null,
+    trainNo: d.trainNo || null, category: d.category || null, origin: d.origin || null, nextStops: d.nextStops || [], previousStops: d.previousStops || [],
     planned: D(d.plannedWhen), actual: D(d.when), delay: minutes(d.delay), cancelled: !!d.cancelled,
   })).filter(d => d.planned);
 }

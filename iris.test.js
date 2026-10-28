@@ -16,6 +16,7 @@ test('Abfahrten', () => {
   const d = toDepartures(merge(parseTimetable(plan), parseTimetable(fchg)), '8004052', new Date('2026-10-28T16:00:00Z'));
   assert.equal(d[0].delay, 300); assert.equal(d[0].direction, 'München Hbf'); assert.equal(d[0].platform, '2'); assert.equal(d[0].line.name, 'RE9'); assert.equal(d[0].plannedPlatform, '1');
   assert.ok(d[0].tripId.endsWith('@8004052@2610281810'));
+  assert.equal(d[0].trainNo, '57312'); assert.equal(d[0].origin, 'Augsburg Hbf'); assert.deepEqual(d[0].nextStops, ['Mering', 'München Hbf']);
 });
 test('Zeit (Sommer-/Winterzeit)', () => {
   assert.equal(parseTime('2610281810').toISOString(), '2026-10-28T17:10:00.000Z'); // CET = UTC+1
