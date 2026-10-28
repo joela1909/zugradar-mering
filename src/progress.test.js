@@ -18,3 +18,18 @@ test('Fortschritt', () => {
   assert.equal(distProgress(1000, 250), .75); assert.equal(distProgress(1000, 2000), 0); assert.equal(distProgress(0, 5), 0);
   assert.equal(buffer(new Date('2026-10-28T19:10Z'), new Date('2026-10-28T19:04Z')), 6); assert.equal(minutesUntil(new Date(5 * 60000), new Date(0)), 5);
 });
+import { matchesDir } from './progress.js';
+test('Richtungsfilter', () => {
+  const ausMuc = { previousStops: ['München Hbf', 'Pasing', 'Maisach', 'Mering'], origin: 'München Hbf', nextStops: ['Augsburg-Hochzoll', 'Augsburg Hbf'] };
+  const ausGeltendorf = { previousStops: ['Geltendorf', 'Mering'], origin: 'Geltendorf', nextStops: ['Augsburg Hbf'] };
+  assert.equal(matchesDir(ausMuc, 'augsburg'), true);
+  assert.equal(matchesDir(ausGeltendorf, 'augsburg'), false);
+  const nachMuc = { previousStops: ['Augsburg Hbf'], nextStops: ['Mering', 'München-Pasing', 'München Hbf'] };
+  const nachPasing = { previousStops: ['Augsburg Hbf'], nextStops: ['Maisach', 'München Pasing'] };
+  const nachGeltendorf = { previousStops: ['Augsburg Hbf'], nextStops: ['Mering', 'Geltendorf'], direction: 'Geltendorf' };
+  assert.equal(matchesDir(nachMuc, 'muenchen'), true);
+  assert.equal(matchesDir(nachPasing, 'muenchen'), true);
+  assert.equal(matchesDir(nachGeltendorf, 'muenchen'), false);
+  assert.equal(matchesDir(nachMuc, 'augsburg'), false);
+  assert.equal(matchesDir({ direction: 'München Hbf' }, 'muenchen'), true);
+});

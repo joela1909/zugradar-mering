@@ -5,7 +5,7 @@ import * as api from './api.js';
 import { prepare, positionAt } from './train.js';
 import { expectedDelay, record, histKey } from './predict.js';
 import { dist } from './geo.js';
-import { dirOf, startName, timeProgress, distProgress, minutesUntil, buffer } from './progress.js';
+import { dirOf, matchesDir, startName, timeProgress, distProgress, minutesUntil, buffer } from './progress.js';
 
 const HOME_ADDRESS = 'Koloniestraße 26, 86399 Bobingen';
 const HOME_FALLBACK = [10.8330, 48.2730]; // Bobingen (Mitte), falls die Adressuche nicht klappt
@@ -20,7 +20,7 @@ const MODES = { car: ['🚗', 'Auto'], bike: ['🚲', 'Rad'], foot: ['🚶', 'zu
 
 let liveError = '';
 const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home2', HOME_FALLBACK), mode: store.get('zr.mode2', 'car'), walk: null, trainMarker: null, open: false, markers: [], dir: store.get('zr.dir', 'muenchen'), me: null, meMarker: null, track: store.get('zr.track', false), trackTotal: 0, watch: null, lastRoute: { ll: null, t: 0 } };
-const vis = () => S.deps.filter(d => dirOf(d) === S.dir);
+const vis = () => S.deps.filter(d => matchesDir(d, S.dir));
 const DIRS = { muenchen: 'München', augsburg: 'Augsburg' };
 
 const map = new maplibregl.Map({ container: 'map', style: 'https://tiles.openfreemap.org/styles/positron', center: S.station.lonlat, zoom: 12, attributionControl: { compact: true } });

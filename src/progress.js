@@ -21,3 +21,16 @@ export const distProgress = (total, remaining) => (total > 0 ? clamp(1 - remaini
 export const minutesUntil = (t, now) => Math.max(0, Math.round((t - now) / 60000));
 /** Puffer in Minuten: Zug-Abfahrt minus eigene Ankunft */
 export const buffer = (trainDep, myEta) => Math.round((trainDep - myEta) / 60000);
+
+const MUC_HBF = /^München Hbf/, MUC_STOP = /^(München[- ]Pasing|München Hbf)/;
+/**
+ * Anzeige-Filter je Richtung:
+ * Richtung Augsburg → nur Züge, die in München Hbf starten bzw. von dort kommen.
+ * Richtung München → nur Züge, die in München-Pasing oder München Hbf halten.
+ */
+export function matchesDir(d, dir) {
+  if (dirOf(d) !== dir) return false;
+  const prev = [...(d.previousStops || []), d.origin].filter(Boolean), next = d.nextStops || [];
+  if (dir === 'augsburg') return prev.length ? prev.some(n => MUC_HBF.test(n)) : /münchen/i.test(d.origin || '');
+  return next.length ? next.some(n => MUC_STOP.test(n)) : /münchen/i.test(d.direction || '');
+}
