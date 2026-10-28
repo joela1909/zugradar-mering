@@ -8,3 +8,7 @@ Mering St Afra, Zugstrecke samt Live-Position und Weg (zu Fuß/Rad/Auto) zum Bah
 - Erwartete Zeit: Live-Prognose gewichtet mit lokal gespeicherter Historie (je Linie + Abfahrtsminute).
 - Startpunkt: ◎ (Standort) oder langer Druck auf die Karte.
 - `npm i && npm run dev` · `npm test` · `npm run build`
+
+## Deploy (Cloudflare Workers/Pages)
+
+Build command `npm run build`, Output `dist`, Deploy command `npx wrangler deploy` (Konfiguration: `wrangler.jsonc`).
