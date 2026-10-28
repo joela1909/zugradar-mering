@@ -1,4 +1,5 @@
 import stations from './stations.json';
+import { buildGraph, shortestPath, thin, overpassQuery } from './rail.js';
 import { trackWindow, hourShifts, parseTime, parseTimetable, parseStations, merge, toDepartures, toStopover, planPath, addHours, tripKey, splitPath } from './iris.js';
 
 const BASE = 'https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1';
@@ -91,6 +92,34 @@ async function departures(env, eva, q) {
 }
 
 // Fahrtverlauf: dieselbe Fahrt an den Nachbarbahnhöfen suchen, dort Zeiten + Koordinaten holen
+// ---- Gleisgeometrie (OpenStreetMap über Overpass), je Abschnitt zwischen zwei Halten, dauerhaft zwischengespeichert ----
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
+async function overpass(query) {
+  let last;
+  for (const u of OVERPASS) {
+    try {
+      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 12000);
+      const r = await fetch(u, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': UA }, body: 'data=' + encodeURIComponent(query), signal: ctl.signal });
+      clearTimeout(t);
+      if (!r.ok) throw new Error('Overpass ' + r.status);
+      return await r.json();
+    } catch (e) { last = e; }
+  }
+  throw new ApiError('Gleisdaten nicht erreichbar: ' + String(last?.message || last).slice(0, 80));
+}
+async function railSegment(from, to) {
+  const a = byEva.get(from), b = byEva.get(to);
+  if (!a || !b) throw new ApiError('Bahnhof unbekannt', 404);
+  const A = [a.longitude, a.latitude], B = [b.longitude, b.latitude];
+  const text = await cached(`rail1:${from}-${to}`, 2592000, async () => {
+    const data = await overpass(overpassQuery(A, B));
+    const path = shortestPath(buildGraph(data.elements), A, B);
+    if (!path) throw new ApiError('Kein Gleisweg gefunden', 404);
+    return JSON.stringify({ coords: thin(path).map(([x, y]) => [+x.toFixed(6), +y.toFixed(6)]) });
+  });
+  return JSON.parse(text);
+}
+
 // Bahnhof per Name: zuerst aus der eingebauten DB-Liste (EVA + Koordinaten), sonst Stationssuche
 const byNameEntry = new Map(stations.map(([eva, name, lat, lon]) => [norm(name), { eva, name, location: { latitude: lat, longitude: lon } }]));
 async function resolve(env, name) {
@@ -134,6 +163,7 @@ export default {
     const path = url.pathname.slice(4), q = url.searchParams;
     try {
       let m;
+      if (path === '/rail') return json(await railSegment(q.get('from') || '', q.get('to') || ''), 200, 86400);
       if (path === '/geocode') return json(await locateAddress(q.get('q') || ''), 200, 86400);
       if (path === '/locations') return json(await locations(env, q), 200, 60);
       if ((m = path.match(/^\/stops\/([^/]+)\/departures$/))) return json(await departures(env, decodeURIComponent(m[1]), q));

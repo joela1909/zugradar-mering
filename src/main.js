@@ -179,7 +179,9 @@ async function selectTrip(id, fit) {
     S.tr = { ...prepare(t.stopovers, t.polyline), raw: t, dep, stopIdx };
     const worst = Math.max(0, ...t.stopovers.map(s => s.arrDelay ?? s.depDelay ?? 0));
     const color = worst >= 5 ? '#ff3b30' : worst >= 1 ? '#ff9f0a' : '#34c759';
+    S.railColor = color;
     map.getSource('rail').setData(lineFeat(t.polyline, { color }));
+    refineRail(S.tr, id);
     t.stopovers.forEach((s, i) => {
       if (i === stopIdx || dist(s.lonlat, S.station.lonlat) < 900) return;
       const d = s.arrDelay ?? s.depDelay ?? 0, tm = s.arr || s.dep;
@@ -190,6 +192,19 @@ async function selectTrip(id, fit) {
   } catch (e) { console.warn(e); S.tr = null; map.getSource('rail').setData(emptyFC); }
   placeBase(); render(); tick();
   if (fit) fitAll();
+}
+
+// Gerade Linien durch echte Gleise ersetzen (Abschnitt für Abschnitt aus OSM, lokal gemerkt)
+async function refineRail(tr, tripId) {
+  if (!S.live) return;
+  const st = tr.raw.stopovers;
+  const segs = await Promise.all(st.slice(0, -1).map((s, i) => api.rail(s.id, st[i + 1].id)));
+  if (S.sel !== tripId || S.tr !== tr || !segs.some(Boolean)) return;
+  const line = [];
+  segs.forEach((c, i) => { const seg = c ? [st[i].lonlat, ...c, st[i + 1].lonlat] : [st[i].lonlat, st[i + 1].lonlat]; line.push(...(line.length ? seg.slice(1) : seg)); });
+  S.tr = { ...tr, ...prepare(st, line) };
+  map.getSource('rail').setData(lineFeat(line, { color: S.railColor }));
+  tick(); layout();
 }
 
 function fitAll() {

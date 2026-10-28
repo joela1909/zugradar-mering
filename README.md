@@ -19,3 +19,7 @@ _Build-Trigger 2026-10-28_
 ## Koordinaten
 
 Bahnhofskoordinaten stammen aus `stations.json` (erzeugt mit `node scripts/build-stations.mjs` aus dem npm-Paket `db-stations`; Daten: Deutsche Bahn StaDa, CC BY 4.0). Mering-St Afra (EVA 8004008) liegt bei 48.274282, 10.971202. Nur unbekannte Orte werden per Photon/OSM gesucht.
+
+## Gleisgeometrie
+
+`/api/rail?from=<EVA>&to=<EVA>` holt die Gleise zwischen zwei Halten aus OpenStreetMap (Overpass, `railway=rail`, ODbL), berechnet den kürzesten Weg (`rail.js`) und speichert ihn 30 Tage im Edge-Cache; der Browser merkt sich jeden Abschnitt dauerhaft. Die Zugposition läuft damit entlang der echten Gleise.

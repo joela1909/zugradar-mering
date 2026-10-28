@@ -81,3 +81,17 @@ export function demo(now = new Date()) {
   const deps = trips.map((t, i) => { const s = t.trip.stopovers[t.trip.stopovers.findIndex(x => /afra/i.test(x.name))]; const names2 = t.trip.stopovers.map(x => x.name), k = names2.findIndex(n => /afra/i.test(n)); return { tripId: 'demo' + i, line: t.line, direction: t.direction, platform: String(i + 1), planned: s.plannedDep, actual: s.dep, delay: s.depDelay, cancelled: false, previousStops: names2.slice(0, k), nextStops: names2.slice(k + 1), origin: names2[0] }; });
   return { station, deps, trip: id => Promise.resolve({ ...trips[+id.slice(4)].trip, currentLocation: null }) };
 }
+
+/** Gleisverlauf zwischen zwei Halten (EVA); lokal dauerhaft gemerkt, "kein Ergebnis" einen Tag lang. */
+export async function rail(a, b) {
+  const k = `zr.rail.v1.${a}.${b}`;
+  try { const c = JSON.parse(localStorage.getItem(k)); if (c && (c.c || Date.now() - c.t < 864e5)) return c.c; } catch {}
+  try {
+    const r = await j(`${BASE}/rail?from=${encodeURIComponent(a)}&to=${encodeURIComponent(b)}`);
+    try { localStorage.setItem(k, JSON.stringify({ c: r.coords, t: Date.now() })); } catch {}
+    return r.coords;
+  } catch (e) {
+    if (/^404/.test(e.message)) { try { localStorage.setItem(k, JSON.stringify({ c: null, t: Date.now() })); } catch {} }
+    return null;
+  }
+}
