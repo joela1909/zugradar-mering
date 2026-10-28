@@ -12,3 +12,5 @@ Mering St Afra, Zugstrecke samt Live-Position und Weg (zu Fuß/Rad/Auto) zum Bah
 ## Deploy (Cloudflare Workers/Pages)
 
 Build command `npm run build`, Output `dist`, Deploy command `npx wrangler deploy` (Konfiguration: `wrangler.jsonc`).
+
+_Build-Trigger 2026-10-28_
