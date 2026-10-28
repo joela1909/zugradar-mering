@@ -34,3 +34,25 @@ export function matchesDir(d, dir) {
   if (dir === 'augsburg') return prev.length ? prev.some(n => MUC_HBF.test(n)) : /münchen/i.test(d.origin || '');
   return next.length ? next.some(n => MUC_STOP.test(n)) : /münchen/i.test(d.direction || '');
 }
+
+/**
+ * Halte zwischen Start und Bahnhof als Positionen (0..1) im Fortschrittsbalken.
+ * names: Halte nach dem Start (Reihenfolge), times: Map Name → Zeit (nur für bekannte Halte).
+ * Halte ohne Zeit werden gleichmäßig zwischen ihren Nachbarn verteilt.
+ */
+export function stopFractions(names, times, tStart, tEnd) {
+  const known = names.map(n => (times.get(n) != null ? timeProgress(tStart, tEnd, times.get(n)) : null));
+  const out = [];
+  for (let i = 0; i < names.length; i++) {
+    let f = known[i];
+    if (f == null) {
+      let a = i - 1, b = i + 1;
+      while (a >= 0 && known[a] == null) a--;
+      while (b < names.length && known[b] == null) b++;
+      const fa = a >= 0 ? known[a] : 0, fb = b < names.length ? known[b] : 1;
+      f = fa + (fb - fa) * (i - a) / (b - a);
+    }
+    out.push({ name: names[i], f });
+  }
+  return out.map((o, i, arr) => ({ ...o, f: Math.max(o.f, i ? arr[i - 1].f : 0) })).filter(o => o.f > 0.02 && o.f < 0.98);
+}

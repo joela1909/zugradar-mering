@@ -5,7 +5,7 @@ import * as api from './api.js';
 import { prepare, positionAt } from './train.js';
 import { expectedDelay, record, histKey } from './predict.js';
 import { dist } from './geo.js';
-import { dirOf, matchesDir, startName, timeProgress, distProgress, minutesUntil, buffer } from './progress.js';
+import { dirOf, matchesDir, startName, timeProgress, distProgress, minutesUntil, buffer, stopFractions } from './progress.js';
 
 const HOME_ADDRESS = 'Koloniestraße 26, 86399 Bobingen';
 const HOME_FALLBACK = [10.8330, 48.2730]; // Bobingen (Mitte), falls die Adressuche nicht klappt
@@ -235,9 +235,21 @@ function renderBoard(list, i, dep, p) {
   const m = $('modebtn'); if (m) m.onclick = e => { e.stopPropagation(); const k = Object.keys(MODES); S.mode = k[(k.indexOf(S.mode) + 1) % k.length]; store.set('zr.mode2', S.mode); loadWalk().then(render); };
 }
 
-function bar(icon, left, right, frac, tone) {
-  const w = Math.round(frac * 100);
-  return `<div class="pbar t-${tone}"><i style="width:${w}%${w ? '' : ';border-right-width:0'}"></i><span class="pl1">${icon} ${left}</span><span class="pr1">${right}</span></div>`;
+function bar(icon, left, right, frac, tone, ticks = []) {
+  const w = Math.round(frac * 100), px = Math.max(240, ($('tag').clientWidth || 360) - 32);
+  const lines = ticks.map(t => `<b class="tk${t.f <= frac ? ' p' : ''}" style="left:${(t.f * 100).toFixed(1)}%"></b>`).join('');
+  let last = -99;
+  const names = ticks.filter(t => { const x = t.f * px; if (t.f < .14 || t.f > .86 || x - last < 56) return false; last = x; return true; })
+    .map(t => `<span style="left:${(t.f * 100).toFixed(1)}%">${shortName(t.name).slice(0, 13)}</span>`).join('');
+  return `<div class="pbar t-${tone}"><i style="width:${w}%${w ? '' : ';border-right-width:0'}"></i>${lines}<span class="pl1">${icon} ${left}</span><span class="pr1">${right}</span></div>${names ? `<div class="tklabels">${names}</div>` : ''}`;
+}
+function trainStops(dep, tStart, tEnd) {
+  const raw = S.tr.raw.stopovers, idx = S.tr.stopIdx;
+  const prev = dep.previousStops?.length ? dep.previousStops : raw.slice(0, Math.max(0, idx)).map(s => s.name);
+  const from = prev.indexOf(startName(dep));
+  const names = prev.slice(from >= 0 ? from + 1 : 0);
+  const times = new Map(raw.slice(0, Math.max(0, idx)).map(s => [s.name, +(s.dep || s.arr)]));
+  return stopFractions(names, times, +tStart, +tEnd);
 }
 function fillProg() {
   const box = $('prog'); if (!box) return;
@@ -247,7 +259,7 @@ function fillProg() {
     const tStart = st?.dep || S.tr.stops[0]?.dep || S.tr.stops[0]?.arr;
     const f = timeProgress(tStart, p.arr, now);
     const arrTxt = `🚉 <b>${fmt(p.arr)}</b>${now < p.arr ? ` · ${minutesUntil(p.arr, now)} min` : ' · da'}`;
-    parts.push(bar("🚆", name, arrTxt, f ?? 0, cls(p.e.min)));
+    parts.push(bar("🚆", name, arrTxt, f ?? 0, cls(p.e.min), tStart ? trainStops(dep, tStart, p.arr) : []));
   }
   if (S.me && S.walk) {
     const eta = new Date(+now + S.walk.seconds * 1000), f = distProgress(S.trackTotal, S.walk.meters);

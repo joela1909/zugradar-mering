@@ -35,3 +35,12 @@ test('Richtungsfilter', () => {
   assert.equal(matchesDir(nachMuc, 'augsburg'), false);
   assert.equal(matchesDir({ direction: 'München Hbf' }, 'muenchen'), true);
 });
+
+import { stopFractions } from './progress.js';
+test('Halte im Balken', () => {
+  const t = new Map([['Maisach', 60], ['Althegnenberg', 80]]);
+  const r = stopFractions(['Pasing', 'Lochhausen', 'Maisach', 'Althegnenberg'], t, 0, 100);
+  assert.deepEqual(r.map(x => x.name), ['Pasing', 'Lochhausen', 'Maisach', 'Althegnenberg']);
+  assert.equal(r[2].f, .6); assert.equal(r[3].f, .8); assert.ok(r[0].f > 0 && r[0].f < r[1].f && r[1].f < .6);
+  assert.deepEqual(stopFractions([], new Map(), 0, 100), []);
+});
