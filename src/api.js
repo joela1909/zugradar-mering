@@ -10,7 +10,7 @@ const minutes = s => (s == null ? null : s / 60);
 export const FALLBACK_STATION = { id: null, name: 'Mering St Afra', lonlat: [10.9870, 48.2730], approx: true };
 
 export async function findStation() {
-  const r = await j(`${BASE}/locations?query=${encodeURIComponent('Mering St Afra')}&results=5&stops=true&addresses=false&poi=false`);
+  const r = await j(`${BASE}/locations?query=${encodeURIComponent('Mering St Afra')}&results=5&v=3`, { cache: 'no-store' });
   const s = r.find(x => /afra/i.test(x.name)) || r[0];
   if (!s) throw new Error('Station nicht gefunden');
   return { id: s.id, name: s.name, lonlat: [s.location.longitude, s.location.latitude] };

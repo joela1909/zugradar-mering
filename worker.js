@@ -114,7 +114,7 @@ export default {
     try {
       let m;
       if (path === '/geocode') return json(await locateAddress(q.get('q') || ''), 200, 86400);
-      if (path === '/locations') return json(await locations(env, q), 200, 3600);
+      if (path === '/locations') return json(await locations(env, q), 200, 60);
       if ((m = path.match(/^\/stops\/([^/]+)\/departures$/))) return json(await departures(env, decodeURIComponent(m[1]), q));
       if ((m = path.match(/^\/trips\/(.+)$/))) return json(await trip(env, decodeURIComponent(m[1])));
       return json({ error: 'unbekannter Pfad' }, 404);
