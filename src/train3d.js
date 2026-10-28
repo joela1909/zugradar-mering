@@ -52,8 +52,12 @@ export function createTrainLayer(maplibregl) {
       const mc = maplibregl.MercatorCoordinate.fromLngLat(state.lonlat, 0);
       // Größe an den Zoom anpassen: mindestens TARGET_PX lang, bei starkem Zoom echte Größe
       const mpp = 40075016.686 * Math.cos(state.lonlat[1] * Math.PI / 180) / (512 * 2 ** this.map.getZoom());
-      const unit = mc.meterInMercatorCoordinateUnits(), sl = unit * Math.max(1, TARGET_PX * mpp / TRAIN_LENGTH), sw = unit * Math.max(1, TARGET_WIDTH_PX * mpp / TRAIN_WIDTH);
-      const model = new THREE.Matrix4().makeTranslation(mc.x, mc.y, mc.z).scale(new THREE.Vector3(sw, -sl, sw)).multiply(new THREE.Matrix4().makeRotationZ(-state.bearing * Math.PI / 180));
+      const unit = mc.meterInMercatorCoordinateUnits();
+      // Reihenfolge (von rechts): erst Länge/Breite entlang der Zugachsen strecken, dann in Fahrtrichtung drehen, dann nach Mercator (y gespiegelt)
+      const model = new THREE.Matrix4().makeTranslation(mc.x, mc.y, mc.z)
+        .multiply(new THREE.Matrix4().makeScale(unit, -unit, unit))
+        .multiply(new THREE.Matrix4().makeRotationZ(-state.bearing * Math.PI / 180))
+        .multiply(new THREE.Matrix4().makeScale(Math.max(1, TARGET_WIDTH_PX * mpp / TRAIN_WIDTH), Math.max(1, TARGET_PX * mpp / TRAIN_LENGTH), Math.max(1, TARGET_WIDTH_PX * mpp / TRAIN_WIDTH)));
       this.camera.projectionMatrix = new THREE.Matrix4().fromArray(args.defaultProjectionData?.mainMatrix ?? args.modelViewProjectionMatrix).multiply(model);
       this.renderer.resetState();
       this.renderer.render(this.scene, this.camera);
