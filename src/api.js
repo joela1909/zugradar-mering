@@ -1,5 +1,9 @@
-const BASE = 'https://v6.db.transport.rest';
-const j = async (u, o) => { const r = await fetch(u, o); if (!r.ok) throw new Error(`${r.status} ${u}`); return r.json(); };
+const BASE = '/api';
+const j = async (u, o) => {
+  const r = await fetch(u, o);
+  if (!r.ok) { let d = ''; try { const b = await r.json(); d = `${b.error || ''} ${b.detail || ''}`; } catch {} throw new Error(`${r.status} ${d || u}`.trim()); }
+  return r.json();
+};
 const D = s => (s ? new Date(s) : null);
 const minutes = s => (s == null ? null : s / 60);
 
