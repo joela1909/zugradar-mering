@@ -1,5 +1,5 @@
 import stations from './stations.json';
-import { parseTime, parseTimetable, parseStations, merge, toDepartures, toStopover, planPath, addHours, tripKey, splitPath } from './iris.js';
+import { trackWindow, hourShifts, parseTime, parseTimetable, parseStations, merge, toDepartures, toStopover, planPath, addHours, tripKey, splitPath } from './iris.js';
 
 const BASE = 'https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1';
 const UA = 'zugradar-mering (privates Hobbyprojekt)';
@@ -91,33 +91,39 @@ async function departures(env, eva, q) {
 }
 
 // Fahrtverlauf: dieselbe Fahrt an den Nachbarbahnhöfen suchen, dort Zeiten + Koordinaten holen
+// Bahnhof per Name: zuerst aus der eingebauten DB-Liste (EVA + Koordinaten), sonst Stationssuche
+const byNameEntry = new Map(stations.map(([eva, name, lat, lon]) => [norm(name), { eva, name, location: { latitude: lat, longitude: lon } }]));
+async function resolve(env, name) {
+  const hit = byNameEntry.get(norm(name));
+  if (hit) return hit;
+  const list = await station(env, name), s = list.find(x => x.name === name) || list[0];
+  return s ? { eva: s.eva, name: s.name, location: known(s.name, s.eva) } : null;
+}
+
+// Fahrtverlauf: dieselbe Fahrt an allen Halten vom Start (München/Augsburg) bis 4 Halte nach dem Bahnhof suchen
 async function trip(env, tripId) {
   const [id, eva, pt] = tripId.split('@');
-  const base = parseTime(pt); // Stundenraster reicht, Nachbarstunden werden mit abgesucht
+  const base = parseTime(pt);
   const own = merge(await plan(env, eva, base), await changes(env, eva)).find(s => s.id === id);
   if (!own) throw new ApiError('Fahrt nicht gefunden');
-  const here = (await station(env, eva).catch(() => [])).find(s => s.eva === eva);
-  const ownName = here?.name || 'Mering St Afra';
-  const before = splitPath(own.ar?.ppth).slice(-4), after = splitPath(own.dp?.ppth).slice(0, 2);
+  const ownName = (stations.find(r => r[0] === eva) || [])[1] || 'Mering St Afra';
+  const win = trackWindow(splitPath(own.ar?.ppth), splitPath(own.dp?.ppth), 4);
   const key = tripKey(id);
-  const find = async (name, hourShifts, noLoc = false) => {
-    const list = await station(env, name), s = list.find(x => x.name === name) || list[0]; if (!s) return null;
-    const location = noLoc ? null : await locate(s.name, s.eva).catch(() => null); if (!noLoc && !location) return null;
-    for (const sh of hourShifts) {
-      const hit = (await plan(env, s.eva, addHours(base, sh))).find(x => tripKey(x.id) === key);
-      if (hit) return toStopover(s.name, s.eva, location, merge([hit], await changes(env, s.eva))[0]);
+  const find = async (name, shifts) => {
+    const st = await resolve(env, name); if (!st?.location) return null;
+    const [sh0, ...rest] = shifts;
+    for (const sh of [sh0, ...rest]) {
+      const hit = (await plan(env, st.eva, addHours(base, sh))).find(x => tripKey(x.id) === key);
+      if (hit) return toStopover(st.name, st.eva, st.location, merge([hit], await changes(env, st.eva))[0]);
     }
     return null;
   };
-  const beforeStops = await Promise.all(before.map(n => find(n, [0, -1])));
-  const afterStops = await Promise.all(after.map(n => find(n, [0, 1])));
+  const n = win.before.length;
+  const beforeStops = await Promise.all(win.before.map((name, i) => find(name, hourShifts(n - i, -1, base))));
+  const afterStops = await Promise.all(win.after.map((name, i) => find(name, hourShifts(i + 1, 1, base))));
   const here1 = toStopover(ownName, eva, await locate(ownName, eva), own);
   const stopovers = [...beforeStops, here1, ...afterStops].filter(Boolean);
-  // Startbahnhof (Augsburg/München Hbf) für den Fortschrittsbalken, nur Zeiten, keine Koordinaten
-  const allBefore = splitPath(own.ar?.ppth);
-  const startName = allBefore.find(n => /^(Augsburg Hbf|München Hbf|München[- ]Pasing)/.test(n)) || allBefore[0];
-  let start = null;
-  if (startName) start = stopovers.find(x => x.stop.name === startName) || await find(startName, [0, -1, -2], true).catch(() => null);
+  const start = stopovers.find(x => x.stop.name === win.start) || null;
   return { trip: { id: tripId, stopovers, start } };
 }
 

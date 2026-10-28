@@ -21,7 +21,7 @@ const store = { get: (k, f) => { try { return JSON.parse(localStorage.getItem(k)
 const MODES = { car: ['🚗', 'Auto'], bike: ['🚲', 'Rad'], foot: ['🚶', 'zu Fuß'] };
 
 let liveError = '';
-const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home2', HOME_FALLBACK), mode: store.get('zr.mode2', 'car'), walk: null, trainMarker: null, board: false, d3: store.get('zr.3d', true), markers: [], dir: store.get('zr.dir', 'muenchen'), me: null, meMarker: null, track: store.get('zr.track', false), trackTotal: 0, watch: null, lastRoute: { ll: null, t: 0 } };
+const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home2', HOME_FALLBACK), mode: store.get('zr.mode2', 'car'), walk: null, trainMarker: null, board: false, fitFull: false, d3: store.get('zr.3d', true), markers: [], dir: store.get('zr.dir', 'muenchen'), me: null, meMarker: null, track: store.get('zr.track', false), trackTotal: 0, watch: null, lastRoute: { ll: null, t: 0 } };
 const vis = () => S.deps.filter(d => matchesDir(d, S.dir));
 const DIRS = { muenchen: 'München', augsburg: 'Augsburg' };
 
@@ -184,7 +184,7 @@ async function selectTrip(id, fit) {
       if (i === stopIdx || dist(s.lonlat, S.station.lonlat) < 900) return;
       const d = s.arrDelay ?? s.depDelay ?? 0, tm = s.arr || s.dep;
       const e = el('lbl', `${shortName(s.name)}<br><i class="${cls(d)}">${fmt(tm)}${d >= 1 ? ' +' + Math.round(d) : ''}</i>`);
-      S.markers.push(reg(mk(e, s.lonlat), s.lonlat, 5, { stop: true }));
+      S.markers.push(reg(mk(e, s.lonlat), s.lonlat, 5 + Math.abs(i - stopIdx), { stop: true }));
       S.markers.push(mk(el('dot', ''), s.lonlat)); dots.push(s.lonlat);
     });
   } catch (e) { console.warn(e); S.tr = null; map.getSource('rail').setData(emptyFC); }
@@ -196,7 +196,7 @@ function fitAll() {
   const b = new maplibregl.LngLatBounds(S.station.lonlat, S.station.lonlat);
   b.extend(S.home); if (S.me) b.extend(S.me);
   S.walk?.coords.forEach(c => b.extend(c));
-  if (S.tr) { b.extend(positionAt(S.tr, new Date()).pos); S.tr.polyline.forEach(c => b.extend(c)); }
+  if (S.tr) { b.extend(positionAt(S.tr, new Date()).pos); if (S.fitFull) S.tr.polyline.forEach(c => b.extend(c)); }
   map.fitBounds(b, { padding: { top: 80, bottom: (S.board ? 440 : 200), left: 70, right: 70 }, maxZoom: 15.5, duration: 800, pitch: S.d3 ? 55 : 0, bearing: 0 });
 }
 
@@ -367,7 +367,7 @@ const setD3 = () => { $('d3').classList.toggle('on', S.d3); $('d3').textContent 
 $('d3').onclick = () => { S.d3 = !S.d3; store.set('zr.3d', S.d3); setD3(); syncTrainLook(); map.easeTo({ pitch: S.d3 ? 55 : 0, bearing: S.d3 ? map.getBearing() : 0, duration: 700 }); setTimeout(layout, 750); };
 setD3();
 $('refresh').onclick = refresh;
-$('fit').onclick = fitAll;
+$('fit').onclick = () => { S.fitFull = !S.fitFull; $('fit').title = S.fitFull ? 'Näher heran' : 'Ganze Strecke'; fitAll(); };
 
 (async () => {
   await loadHome();

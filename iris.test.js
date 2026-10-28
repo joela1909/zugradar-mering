@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { parseTimetable, parseStations, merge, parseTime, toDepartures, toStopover, decode, planPath, tripKey } from './iris.js';
+import { trackWindow, hourShifts, parseTimetable, parseStations, merge, parseTime, toDepartures, toStopover, decode, planPath, tripKey } from './iris.js';
 
 const plan = `<?xml version="1.0"?><timetable station="Mering St Afra"><s id="-7381563449385417706-2610281752-5" eva="8004052">
 <tl f="N" t="p" o="80" c="RE" n="57312"/><ar pt="2610281809" pp="1" l="RE9" ppth="Augsburg Hbf|Augsburg-Hochzoll"/>
@@ -26,3 +26,15 @@ test('Zeit (Sommer-/Winterzeit)', () => {
 test('Bahnhofssuche', () => assert.equal(parseStations('<stations><station name="Mering-St Afra" eva="8004052" ds100="MMS"/></stations>')[0].eva, '8004052'));
 test('Stopover', () => { const s = parseTimetable(plan)[0]; const o = toStopover('X', '1', { latitude: 1, longitude: 2 }, s); assert.equal(o.departureDelay, 0); assert.equal(o.plannedArrival, '2026-10-28T17:09:00.000Z'); });
 test('misc', () => { assert.equal(decode('a&amp;b'), 'a&b'); assert.equal(tripKey('-1-2610281752-5'), '-1-2610281752'); });
+
+test('Tracking-Fenster', () => {
+  const w = trackWindow(['Ulm', 'München Hbf', 'München-Pasing', 'Maisach', 'Mering'], ['Augsburg-Hochzoll', 'A2', 'A3', 'Augsburg Hbf', 'Ulm Hbf']);
+  assert.equal(w.start, 'München Hbf'); assert.deepEqual(w.before, ['München Hbf', 'München-Pasing', 'Maisach', 'Mering']); assert.equal(w.after.length, 4);
+  assert.deepEqual(trackWindow(['Dasing', 'Mering'], []).before, ['Dasing', 'Mering']);
+});
+test('Stundenverschiebung', () => {
+  const t0 = new Date('2026-10-28T18:05:00Z');
+  assert.equal(hourShifts(0, -1, t0)[0], 0);
+  assert.equal(hourShifts(10, -1, t0)[0], -1); // 45 min früher → Stunde davor
+  assert.equal(hourShifts(3, 1, t0)[0], 0);
+});
