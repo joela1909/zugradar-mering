@@ -31,3 +31,19 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;border
 .train span{font-size:17px}.train b{color:#ff9f0a}
 .me{padding:6px 12px;border-radius:14px;background:#fff;color:#1d1d1f;font-weight:600;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.22)}
 .maplibregl-ctrl-attrib{font-size:9px!important;opacity:.7}
+
+.dirctl{position:fixed;top:max(12px,env(safe-area-inset-top));left:12px;z-index:6;border-radius:99px;display:flex;padding:3px;gap:2px}
+.dirctl button{padding:6px 14px;font-size:13px;font-weight:600;color:var(--mute);letter-spacing:-.01em}
+.dirctl button.on{background:var(--ink);color:var(--glass)}
+@media (prefers-color-scheme:light){.dirctl button.on{color:#fff}}
+.status{top:calc(max(12px,env(safe-area-inset-top)) + 46px)}
+.fabs button.on{color:var(--ok)}
+.prog{margin-top:10px}.pl{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--mute);margin-bottom:5px;letter-spacing:-.005em}.pl b{color:var(--ink);font-weight:600}
+.pl span:first-child{white-space:nowrap;font-weight:600;color:var(--ink)}.pl span:last-child{text-align:right}
+.track{position:relative;height:6px;border-radius:99px;background:var(--fill)}
+.track i{position:absolute;left:0;top:0;bottom:0;border-radius:99px;background:var(--ok);transition:width .8s ease}
+.track.minor i{background:var(--warn)}.track.late i{background:var(--bad)}.track.me i{background:var(--blue)}
+.track u{position:absolute;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.35);transition:left .8s ease}
+.gpsbtn{margin-top:10px;width:100%;padding:8px;border-radius:12px;background:var(--fill);font-size:13px;font-weight:600;color:var(--blue)}
+.gps{width:18px;height:18px;border-radius:50%;background:#0a84ff;border:3px solid #fff;box-shadow:0 0 0 7px rgba(10,132,255,.25),0 2px 8px rgba(0,0,0,.3);animation:pulse 2.2s ease-in-out infinite}
+@keyframes pulse{50%{box-shadow:0 0 0 14px rgba(10,132,255,0),0 2px 8px rgba(0,0,0,.3)}}

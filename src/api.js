@@ -36,9 +36,10 @@ export async function trip(tripId, station) {
     plannedArr: D(s.plannedArrival), plannedDep: D(s.plannedDeparture),
     arrDelay: minutes(s.arrivalDelay), depDelay: minutes(s.departureDelay), cancelled: !!s.cancelled,
   }));
+  const st = t.start && { name: t.start.stop.name, dep: D(t.start.departure || t.start.plannedDeparture), plannedDep: D(t.start.plannedDeparture), depDelay: minutes(t.start.departureDelay) };
   const polyline = (t.polyline?.features || []).map(f => f.geometry.coordinates);
   const line = polyline.length > 1 ? polyline : stopovers.map(s => s.lonlat);
-  return { stopovers, polyline: line, currentLocation: t.currentLocation ? [t.currentLocation.longitude, t.currentLocation.latitude] : null };
+  return { stopovers, start: st || null, polyline: line, currentLocation: t.currentLocation ? [t.currentLocation.longitude, t.currentLocation.latitude] : null };
 }
 
 const ROUTERS = { foot: 'routed-foot', bike: 'routed-bike', car: 'routed-car' };
@@ -62,20 +63,21 @@ export function demo(now = new Date()) {
   polyline.push(names[names.length - 1][1]);
   // Haltepunkte exakt auf die Linie legen
   const snap = p => polyline.reduce((b, q) => (Math.hypot(q[0] - p[0], q[1] - p[1]) < Math.hypot(b[0] - p[0], b[1] - p[1]) ? q : b));
-  const mk = (off, delays) => {
+  const mk = (off, delays, rev = false) => {
     const base = new Date(now); base.setSeconds(0, 0);
     const mins = [0, 6, 12, 15, 24, 31, 52];
-    const stopovers = names.map(([n, ll], i) => {
+    const stopovers = (rev ? [...names].reverse() : names).map(([n, ll], i) => {
       const p = new Date(+base + (off + mins[i]) * 60000), dl = delays[i] ?? delays[delays.length - 1];
       return { name: n, lonlat: snap(ll), plannedArr: p, plannedDep: new Date(+p + 60000), arr: new Date(+p + dl * 60000), dep: new Date(+p + 60000 + dl * 60000), arrDelay: dl, depDelay: dl };
     });
-    return { stopovers, polyline };
+    return { stopovers, polyline: rev ? [...polyline].reverse() : polyline, start: { name: stopovers[0].name, dep: stopovers[0].dep, plannedDep: stopovers[0].plannedDep, depDelay: stopovers[0].depDelay } };
   };
   const trips = [
     { line: 'RE 9', direction: 'München Hbf', trip: mk(-9, [2, 3, 4, 5]) },
     { line: 'RB 86', direction: 'München Hbf', trip: mk(14, [0, 1, 3, 6]) },
     { line: 'RE 80', direction: 'München Hbf', trip: mk(38, [0, 0, 0, 0]) },
+    { line: 'RE 9', direction: 'Ulm Hbf', trip: mk(-5, [0, 1, 2], true), rev: true },
   ];
-  const deps = trips.map((t, i) => { const s = t.trip.stopovers[2]; return { tripId: 'demo' + i, line: t.line, direction: t.direction, platform: String(i + 1), planned: s.plannedDep, actual: s.dep, delay: s.depDelay, cancelled: false }; });
+  const deps = trips.map((t, i) => { const s = t.trip.stopovers[t.trip.stopovers.findIndex(x => /afra/i.test(x.name))]; const names2 = t.trip.stopovers.map(x => x.name), k = names2.findIndex(n => /afra/i.test(n)); return { tripId: 'demo' + i, line: t.line, direction: t.direction, platform: String(i + 1), planned: s.plannedDep, actual: s.dep, delay: s.depDelay, cancelled: false, previousStops: names2.slice(0, k), nextStops: names2.slice(k + 1), origin: names2[0] }; });
   return { station, deps, trip: id => Promise.resolve({ ...trips[+id.slice(4)].trip, currentLocation: null }) };
 }

@@ -90,9 +90,9 @@ async function trip(env, tripId) {
   const ownName = here?.name || 'Mering St Afra';
   const before = splitPath(own.ar?.ppth).slice(-4), after = splitPath(own.dp?.ppth).slice(0, 2);
   const key = tripKey(id);
-  const find = async (name, hourShifts) => {
-    const s = (await station(env, name))[0]; if (!s) return null;
-    const location = await locate(s.name).catch(() => null); if (!location) return null;
+  const find = async (name, hourShifts, noLoc = false) => {
+    const list = await station(env, name), s = list.find(x => x.name === name) || list[0]; if (!s) return null;
+    const location = noLoc ? null : await locate(s.name).catch(() => null); if (!noLoc && !location) return null;
     for (const sh of hourShifts) {
       const hit = (await plan(env, s.eva, addHours(base, sh))).find(x => tripKey(x.id) === key);
       if (hit) return toStopover(s.name, s.eva, location, merge([hit], await changes(env, s.eva))[0]);
@@ -103,7 +103,12 @@ async function trip(env, tripId) {
   const afterStops = await Promise.all(after.map(n => find(n, [0, 1])));
   const here1 = toStopover(ownName, eva, await locate(ownName), own);
   const stopovers = [...beforeStops, here1, ...afterStops].filter(Boolean);
-  return { trip: { id: tripId, stopovers } };
+  // Startbahnhof (Augsburg/München Hbf) für den Fortschrittsbalken, nur Zeiten, keine Koordinaten
+  const allBefore = splitPath(own.ar?.ppth);
+  const startName = allBefore.find(n => /^(Augsburg|München) Hbf/.test(n)) || allBefore[0];
+  let start = null;
+  if (startName) start = stopovers.find(x => x.stop.name === startName) || await find(startName, [0, -1, -2], true).catch(() => null);
+  return { trip: { id: tripId, stopovers, start } };
 }
 
 export default {
