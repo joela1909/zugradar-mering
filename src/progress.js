@@ -1,5 +1,5 @@
 // Reine Logik: Richtung, Startbahnhof, Fortschritt
-export const START_RE = /^(Augsburg|München) Hbf/;
+export const START_RE = /^(Augsburg Hbf|München Hbf|München[- ]Pasing)/;
 const AUGSBURG_SIDE = /augsburg|ulm|donauw|würzburg|nürnberg|ingolstadt/i;
 
 /** 'augsburg' = fährt Richtung Augsburg, sonst 'muenchen' */
@@ -22,10 +22,10 @@ export const minutesUntil = (t, now) => Math.max(0, Math.round((t - now) / 60000
 /** Puffer in Minuten: Zug-Abfahrt minus eigene Ankunft */
 export const buffer = (trainDep, myEta) => Math.round((trainDep - myEta) / 60000);
 
-const MUC_HBF = /^München Hbf/, MUC_STOP = /^(München[- ]Pasing|München Hbf)/;
+const MUC_HBF = /^(München Hbf|München[- ]Pasing)/, MUC_STOP = /^(München[- ]Pasing|München Hbf)/;
 /**
  * Anzeige-Filter je Richtung:
- * Richtung Augsburg → nur Züge, die in München Hbf starten bzw. von dort kommen.
+ * Richtung Augsburg → nur Züge, die in München Hbf oder München-Pasing starten bzw. von dort kommen.
  * Richtung München → nur Züge, die in München-Pasing oder München Hbf halten.
  */
 export function matchesDir(d, dir) {

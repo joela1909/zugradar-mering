@@ -10,6 +10,7 @@ test('Richtung', () => {
 test('Startbahnhof', () => {
   assert.equal(startName({ previousStops: ['Ulm Hbf', 'Augsburg Hbf', 'Augsburg-Hochzoll'] }), 'Augsburg Hbf');
   assert.equal(startName({ previousStops: ['Pasing', 'München Hbf'] }), 'München Hbf');
+  assert.equal(startName({ previousStops: ['München-Pasing', 'Maisach'] }), 'München-Pasing');
   assert.equal(startName({ previousStops: ['Dasing', 'Mering'] }), 'Dasing');
   assert.equal(startName({}), null);
 });
@@ -24,6 +25,7 @@ test('Richtungsfilter', () => {
   const ausGeltendorf = { previousStops: ['Geltendorf', 'Mering'], origin: 'Geltendorf', nextStops: ['Augsburg Hbf'] };
   assert.equal(matchesDir(ausMuc, 'augsburg'), true);
   assert.equal(matchesDir(ausGeltendorf, 'augsburg'), false);
+  assert.equal(matchesDir({ previousStops: ['München-Pasing', 'Mering'], origin: 'München-Pasing', nextStops: ['Augsburg Hbf'] }, 'augsburg'), true);
   const nachMuc = { previousStops: ['Augsburg Hbf'], nextStops: ['Mering', 'München-Pasing', 'München Hbf'] };
   const nachPasing = { previousStops: ['Augsburg Hbf'], nextStops: ['Maisach', 'München Pasing'] };
   const nachGeltendorf = { previousStops: ['Augsburg Hbf'], nextStops: ['Mering', 'Geltendorf'], direction: 'Geltendorf' };

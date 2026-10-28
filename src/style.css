@@ -47,3 +47,20 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;border
 .gpsbtn{margin-top:10px;width:100%;padding:8px;border-radius:12px;background:var(--fill);font-size:13px;font-weight:600;color:var(--blue)}
 .gps{width:18px;height:18px;border-radius:50%;background:#0a84ff;border:3px solid #fff;box-shadow:0 0 0 7px rgba(10,132,255,.25),0 2px 8px rgba(0,0,0,.3);animation:pulse 2.2s ease-in-out infinite}
 @keyframes pulse{50%{box-shadow:0 0 0 14px rgba(10,132,255,0),0 2px 8px rgba(0,0,0,.3)}}
+
+.tag{cursor:pointer;padding:14px 16px 12px}
+.row.top .plat{color:var(--mute);font-size:13px;font-weight:500}.chev{color:var(--mute);font-size:16px;width:16px;text-align:center}
+.times{margin:8px 0 2px}.chip{font-weight:600;font-size:13px;padding:2px 9px;border-radius:99px;background:var(--fill)}
+.chip.ontime{color:var(--ok)}.chip.minor{color:var(--warn)}.chip.late{color:var(--bad)}
+.badge.sm{font-size:12px;padding:1px 7px;border-radius:6px}
+.board{position:fixed;left:12px;right:12px;bottom:calc(var(--tagh,150px) + max(12px,env(safe-area-inset-bottom)) + 8px);z-index:5;border-radius:26px;max-width:520px;margin:0 auto;padding:12px 8px 8px;max-height:52vh;overflow:auto;animation:rise .3s ease}
+.board[hidden]{display:none}@keyframes rise{from{opacity:0;transform:translateY(10px)}}
+.bh{display:flex;justify-content:space-between;align-items:baseline;padding:0 10px 6px}.bh b{font-size:15px;letter-spacing:-.01em}
+.brow{display:flex;align-items:center;gap:10px;width:100%;padding:9px 10px;border-radius:14px;text-align:left;font-variant-numeric:tabular-nums}
+.brow.sel{background:var(--fill)}.bt{width:56px;display:flex;flex-direction:column;line-height:1.1}.bt b{font-size:17px;font-weight:700;letter-spacing:-.02em}.bt s{font-size:11px;color:var(--mute)}
+.bd{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px;font-weight:500}.bg{color:var(--mute);font-size:12px}
+.bd2{margin:6px 10px 2px;padding-top:10px;border-top:.5px solid var(--line);display:flex;flex-direction:column;gap:6px;font-size:13px}
+.bd2 div{display:flex;justify-content:space-between;gap:14px}.bd2 div span:first-child{color:var(--mute);flex:none}.bd2 div span:last-child{text-align:right}
+.pillbtn{background:var(--fill);padding:2px 10px;font-size:13px;color:var(--blue);font-weight:600}
+.trainmodel{width:28px;height:84px;pointer-events:none;transform-origin:center}.trainmodel svg{display:block;transform:scale(.85);transform-origin:center}
+.lbl.train-l{background:#1d1d1f;color:#fff;font-size:12px;padding:3px 9px;border-radius:99px}.lbl.train-l b{color:#ff9f0a}

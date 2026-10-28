@@ -19,7 +19,7 @@ const store = { get: (k, f) => { try { return JSON.parse(localStorage.getItem(k)
 const MODES = { car: ['🚗', 'Auto'], bike: ['🚲', 'Rad'], foot: ['🚶', 'zu Fuß'] };
 
 let liveError = '';
-const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home2', HOME_FALLBACK), mode: store.get('zr.mode2', 'car'), walk: null, trainMarker: null, open: false, markers: [], dir: store.get('zr.dir', 'muenchen'), me: null, meMarker: null, track: store.get('zr.track', false), trackTotal: 0, watch: null, lastRoute: { ll: null, t: 0 } };
+const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home2', HOME_FALLBACK), mode: store.get('zr.mode2', 'car'), walk: null, trainMarker: null, board: false, markers: [], dir: store.get('zr.dir', 'muenchen'), me: null, meMarker: null, track: store.get('zr.track', false), trackTotal: 0, watch: null, lastRoute: { ll: null, t: 0 } };
 const vis = () => S.deps.filter(d => matchesDir(d, S.dir));
 const DIRS = { muenchen: 'München', augsburg: 'Augsburg' };
 
@@ -55,6 +55,7 @@ const rect = (cx, cy, w, h) => ({ x1: cx - w / 2, y1: cy - h / 2, x2: cx + w / 2
 const hit = (a, b) => !(a.x2 <= b.x1 || a.x1 >= b.x2 || a.y2 <= b.y1 || a.y1 >= b.y2);
 function layout() {
   const placed = [...dots, ...(S.me ? [S.me] : [])].map(ll => { const p = map.project(ll); return rect(p.x, p.y, 14, 14); });
+  if (S.trainPos) { const p = map.project(S.trainPos); placed.push(rect(p.x, p.y, 34, 34)); }
   const items = labels.filter(l => l.marker.getElement().isConnected).sort((a, b) => a.prio - b.prio);
   for (const it of items) {
     const el = it.marker.getElement(); el.style.display = '';
@@ -152,7 +153,7 @@ function fitAll() {
   b.extend(S.home); if (S.me) b.extend(S.me);
   S.walk?.coords.forEach(c => b.extend(c));
   if (S.tr) { b.extend(positionAt(S.tr, new Date()).pos); S.tr.polyline.forEach(c => b.extend(c)); }
-  map.fitBounds(b, { padding: { top: 80, bottom: (S.open ? 300 : 160), left: 70, right: 70 }, maxZoom: 15.5, duration: 800 });
+  map.fitBounds(b, { padding: { top: 80, bottom: (S.board ? 440 : 200), left: 70, right: 70 }, maxZoom: 15.5, duration: 800 });
 }
 
 function prediction() {
@@ -171,35 +172,44 @@ function prediction() {
 
 function render() {
   const list = vis(), i = list.findIndex(d => d.tripId === S.sel), dep = list[i];
-  if (!dep) { $('tag').innerHTML = `<div class="sub">Keine Abfahrten Richtung ${DIRS[S.dir]} gefunden.</div>`; return; }
+  $('board').hidden = !S.board;
+  if (!dep) { $('tag').className = 'glass tag'; $('tag').innerHTML = `<div class="sub">Keine Abfahrten Richtung ${DIRS[S.dir]} gefunden.</div>`; $('board').hidden = true; return; }
   const p = prediction(), walkMin = S.walk ? Math.ceil(S.walk.seconds / 60) : null;
   const dMin = dep.cancelled ? 0 : (p ? p.e.min : dep.delay ?? 0);
   const leave = p && walkMin != null ? addMin(p.depT, -walkMin - 1) : null;
-  const buffer = dep.delay >= 1 ? ` · Zug <b class="${cls(dep.delay)}">+${Math.round(dep.delay)} min</b> → so viel mehr Zeit` : '';
-  $('tag').className = 'glass tag' + (S.open ? ' open' : '');
+  $('tag').className = 'glass tag' + (S.board ? ' open' : '');
   $('tag').innerHTML = `
-  <div class="row top"><button class="nav" id="prev" ${i <= 0 ? 'disabled' : ''}>‹</button><span class="badge">${dep.line}</span><span class="dir">→ ${dep.direction}</span><button class="nav" id="next" ${i >= list.length - 1 ? 'disabled' : ''}>›</button></div>
-  <div class="times"><span class="big ${dep.cancelled ? 'late' : cls(dMin)}">${dep.cancelled ? 'fällt aus' : fmt(p?.depT || dep.actual || dep.planned)}</span>${dep.cancelled ? '' : `<s>${fmt(p?.plannedDep || dep.planned)}</s><span class="d ${cls(dMin)}">${sgn(dMin)} min</span>`}<span class="sub" style="margin-left:auto">Gl. ${dep.platform}</span></div>
-  <div class="sub">${leave ? `Spätestens los <b>${fmt(leave)}</b> (${MODES[S.mode][0]} ${walkMin} min)` : 'Weg wird berechnet …'}${buffer}</div>
-  <div id="prog"></div>
-  <div class="more">
-    ${p ? `<div><span>Ankunft planmäßig / erwartet</span><span>${fmt(p.plannedArr)} / <b>${fmt(p.arr)}</b></span></div>
-    <div><span>Abfahrt planmäßig / aktuell</span><span>${fmt(p.plannedDep)} / <b>${fmt(dep.actual || dep.planned)}</b></span></div>
-    <div><span>Prognose-Basis</span><span>${p.e.basis}</span></div>
-    <div><span>Halte bis hier</span><span>${p.stopsAway}</span></div>` : ''}
-    ${dep.trainNo ? `<div><span>Zug</span><span>${dep.category || ''} ${dep.trainNo}</span></div>` : ''}
-    ${dep.plannedPlatform && dep.platform !== dep.plannedPlatform ? `<div><span>Gleiswechsel</span><span class="late">Gl. ${dep.platform} statt ${dep.plannedPlatform}</span></div>` : ''}
-    ${dep.origin ? `<div><span>Von → Nach</span><span>${dep.origin} → ${dep.direction}</span></div>` : ''}
-    ${(dep.previousStops?.length || dep.nextStops?.length) ? `<div><span>Verlauf</span><span style="text-align:right;max-width:68%">${[...(dep.previousStops || []).slice(-3), '<b>Mering St Afra</b>', ...(dep.nextStops || [])].join(' › ')}</span></div>` : ''}
-    ${list.slice(i + 1, i + 3).length ? `<div><span>Danach</span><span style="text-align:right">${list.slice(i + 1, i + 3).map(n => `${fmt(n.actual || n.planned)} ${n.line}${n.delay >= 1 ? ' +' + Math.round(n.delay) : ''}`).join(' · ')}</span></div>` : ''}
-    <div><span>Verkehrsmittel zum Bahnhof</span><span><button id="modebtn" style="background:var(--line);padding:2px 10px">${MODES[S.mode][0]} ${MODES[S.mode][1]} ⇄</button></span></div>
-    <div><span>Startpunkt</span><span>Koloniestraße 26, Bobingen</span></div>
-    <div><span>Quelle</span><span>${S.live ? 'DB Live' : 'Demo'}</span></div>
-  </div>`;
-  $('prev').onclick = e => { e.stopPropagation(); selectTrip(list[i - 1].tripId, true); };
-  $('next').onclick = e => { e.stopPropagation(); selectTrip(list[i + 1].tripId, true); };
+  <div class="row top"><span class="badge">${dep.line}</span><span class="dir">→ ${dep.direction}</span><span class="plat">Gl. ${dep.platform}</span><span class="chev">${S.board ? '⌄' : '⌃'}</span></div>
+  <div class="times"><span class="big ${dep.cancelled ? 'late' : cls(dMin)}">${dep.cancelled ? 'fällt aus' : fmt(p?.depT || dep.actual || dep.planned)}</span>${dep.cancelled ? '' : `<s>${fmt(p?.plannedDep || dep.planned)}</s><span class="chip ${cls(dMin)}">${sgn(dMin)} min</span>`}</div>
+  <div class="sub">${leave ? `Spätestens los <b>${fmt(leave)}</b> · ${MODES[S.mode][0]} ${walkMin} min` : 'Weg wird berechnet …'}</div>
+  <div id="prog"></div>`;
+  renderBoard(list, i, dep, p);
   fillProg();
-  const m = $("modebtn"); if (m) m.onclick = e => { e.stopPropagation(); const k = Object.keys(MODES); S.mode = k[(k.indexOf(S.mode) + 1) % k.length]; store.set('zr.mode2', S.mode); loadWalk().then(render); };
+  requestAnimationFrame(() => document.documentElement.style.setProperty('--tagh', $('tag').offsetHeight + 'px'));
+}
+
+function renderBoard(list, i, dep, p) {
+  if (!S.board) return;
+  const rows = list.slice(0, 8).map(d => {
+    const m = d.delay ?? 0, t = d.actual || d.planned;
+    return `<button class="brow ${d.tripId === S.sel ? 'sel' : ''}" data-id="${d.tripId}">
+      <span class="bt"><b class="${d.cancelled ? 'late' : cls(m)}">${d.cancelled ? '—' : fmt(t)}</b>${m >= 1 && !d.cancelled ? `<s>${fmt(d.planned)}</s>` : ''}</span>
+      <span class="badge sm">${d.line}</span><span class="bd">${d.cancelled ? 'fällt aus · ' : ''}${d.direction}</span><span class="bg">Gl. ${d.platform}</span>
+      ${m >= 1 && !d.cancelled ? `<span class="chip ${cls(m)}">+${Math.round(m)}</span>` : '<span class="chip ontime">•</span>'}</button>`;
+  }).join('');
+  const kv = (k, v) => `<div><span>${k}</span><span>${v}</span></div>`;
+  const details = [
+    p && kv('Ankunft plan / erwartet', `${fmt(p.plannedArr)} / <b>${fmt(p.arr)}</b>`),
+    p && kv('Prognose', p.e.basis),
+    dep.trainNo && kv('Zug', `${dep.category || ''} ${dep.trainNo}`),
+    dep.plannedPlatform && dep.platform !== dep.plannedPlatform && kv('Gleiswechsel', `<span class="late">Gl. ${dep.platform} statt ${dep.plannedPlatform}</span>`),
+    (dep.previousStops?.length || dep.nextStops?.length) && kv('Verlauf', [...(dep.previousStops || []).slice(-2), '<b>Mering St Afra</b>', ...(dep.nextStops || []).slice(0, 3)].join(' › ')),
+    kv('Weg zum Bahnhof', `<button id="modebtn" class="pillbtn">${MODES[S.mode][0]} ${MODES[S.mode][1]} ⇄</button>`),
+    kv('Quelle', S.live ? 'DB Live' : 'Demo'),
+  ].filter(Boolean).join('');
+  $('board').innerHTML = `<div class="bh"><b>Nächste Verbindungen</b><span class="sub">→ ${DIRS[S.dir]}</span></div><div class="blist">${rows || '<div class="sub" style="padding:8px 4px">Keine weiteren Verbindungen.</div>'}</div><div class="bd2">${details}</div>`;
+  $('board').querySelectorAll('.brow').forEach(b => b.onclick = e => { e.stopPropagation(); selectTrip(b.dataset.id, true); });
+  const m = $('modebtn'); if (m) m.onclick = e => { e.stopPropagation(); const k = Object.keys(MODES); S.mode = k[(k.indexOf(S.mode) + 1) % k.length]; store.set('zr.mode2', S.mode); loadWalk().then(render); };
 }
 
 function bar(icon, left, right, frac, tone) {
@@ -257,15 +267,27 @@ document.querySelectorAll('#dirctl button').forEach(b => b.onclick = async () =>
   S.sel = pickDefault()?.tripId; await selectTrip(S.sel, true);
 });
 updateDirUI();
-$('tag').onclick = () => { S.open = !S.open; render(); };
+$('tag').onclick = () => { S.board = !S.board; render(); };
+map.on('click', () => { if (S.board) { S.board = false; render(); } });
+
+const TRAIN_SVG = `<svg viewBox="0 0 28 84" width="28" height="84" aria-hidden="true"><defs><filter id="ts" x="-40%" y="-20%" width="180%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="2.2" flood-opacity=".38"/></filter></defs>
+<g filter="url(#ts)"><rect x="4" y="2" width="20" height="80" rx="10" fill="#fff" stroke="#c7c7cc" stroke-width="1"/>
+<rect x="4" y="30" width="20" height="1.2" fill="#d1d1d6"/><rect x="4" y="56" width="20" height="1.2" fill="#d1d1d6"/>
+<rect x="4" y="2" width="4" height="80" rx="2" fill="#ec0016"/><rect x="20" y="2" width="4" height="80" rx="2" fill="#ec0016"/>
+<path d="M9 10c0-3 2.2-5 5-5s5 2 5 5v5H9z" fill="#2c2c2e"/><rect x="10" y="20" width="8" height="5" rx="2" fill="#e5e5ea"/><rect x="10" y="38" width="8" height="5" rx="2" fill="#e5e5ea"/><rect x="10" y="62" width="8" height="5" rx="2" fill="#e5e5ea"/></g></svg>`;
 
 function tick() {
-  if (!S.tr) { S.trainMarker?.remove(); S.trainMarker = null; return; }
+  if (!S.tr) { S.trainMarker?.remove(); S.trainMarker = null; S.trainLabel?.remove(); S.trainLabel = null; S.trainPos = null; return; }
   const now = new Date(), p = positionAt(S.tr, now);
-  const pos = S.live && S.tr.raw.currentLocation && p.state === 'fährt' ? S.tr.raw.currentLocation : p.pos;
-  const d = S.tr.dep.delay ?? 0, html = `<span>🚆</span>${S.tr.dep.line}${d >= 1 ? ` <b>+${Math.round(d)}</b>` : ''}`;
-  if (!S.trainMarker) { S.trainMarker = mk(el('train', html), pos); S.trainMarker._zr = { marker: S.trainMarker, ll: pos, prio: 0, fixed: true, essential: true, keep: true }; labels.push(S.trainMarker._zr); }
-  else { S.trainMarker.setLngLat(pos); S.trainMarker._zr.ll = pos; S.trainMarker.getElement().innerHTML = html; }
+  const live = S.live && S.tr.raw.currentLocation && p.state === 'fährt';
+  const pos = live ? S.tr.raw.currentLocation : p.pos;
+  S.trainPos = pos;
+  const d = S.tr.dep.delay ?? 0, html = `${S.tr.dep.line}${d >= 1 ? ` <b>+${Math.round(d)}</b>` : ''}`;
+  if (!S.trainMarker) S.trainMarker = new maplibregl.Marker({ element: el('trainmodel', TRAIN_SVG), anchor: 'center', rotationAlignment: 'map' }).setLngLat(pos).addTo(map);
+  S.trainMarker.setLngLat(pos).setRotation(p.bearing || 0);
+  if (!S.trainLabel) { S.trainLabel = mk(el('lbl train-l', html), pos); labels.push({ marker: S.trainLabel, ll: pos, prio: 0, essential: true, trainLabel: true }); }
+  const it = labels.find(l => l.trainLabel); if (it) it.ll = pos;
+  S.trainLabel.setLngLat(pos); S.trainLabel.getElement().innerHTML = html;
   layout(); fillProg();
 }
 

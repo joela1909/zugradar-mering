@@ -105,7 +105,7 @@ async function trip(env, tripId) {
   const stopovers = [...beforeStops, here1, ...afterStops].filter(Boolean);
   // Startbahnhof (Augsburg/München Hbf) für den Fortschrittsbalken, nur Zeiten, keine Koordinaten
   const allBefore = splitPath(own.ar?.ppth);
-  const startName = allBefore.find(n => /^(Augsburg|München) Hbf/.test(n)) || allBefore[0];
+  const startName = allBefore.find(n => /^(Augsburg Hbf|München Hbf|München[- ]Pasing)/.test(n)) || allBefore[0];
   let start = null;
   if (startName) start = stopovers.find(x => x.stop.name === startName) || await find(startName, [0, -1, -2], true).catch(() => null);
   return { trip: { id: tripId, stopovers, start } };
