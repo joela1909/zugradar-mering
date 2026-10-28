@@ -33,14 +33,12 @@ const station = async (env, pattern) => parseStations(await db(env, '/station/' 
 const plan = async (env, eva, date) => parseTimetable(await db(env, `/plan/${eva}/${planPath(date)}`, 300));
 const changes = async (env, eva) => parseTimetable(await db(env, `/fchg/${eva}`, 30));
 
-// Feste Kartenposition für Mering-St Afra (nur Darstellung, Fahrplan- und GPS-Daten bleiben unverändert)
-const OVERRIDES = [[/^Mering[- ]St\.? ?Afra/i, { latitude: 48.2740395, longitude: 10.9714372 }]];
 
 // Koordinaten aus den Stationsdaten der Bahn (EVA bzw. Name), sonst Ortssuche
 const norm = n => n.toLowerCase().replace(/[^a-zäöüß0-9]/g, '');
 const byEva = new Map(stations.map(([eva, , lat, lon]) => [eva, { latitude: lat, longitude: lon }]));
 const byName = new Map(stations.map(([, name, lat, lon]) => [norm(name), { latitude: lat, longitude: lon }]));
-const known = (name, eva) => OVERRIDES.find(([re]) => re.test(name))?.[1] || (eva && byEva.get(eva)) || byName.get(norm(name)) || null;
+const known = (name, eva) => (eva && byEva.get(eva)) || byName.get(norm(name)) || null;
 
 // Koordinaten per Ortssuche (Photon/OSM), 30 Tage gemerkt – nur für unbekannte Orte
 async function locate(name, eva) {
