@@ -15,6 +15,7 @@ const fmt = d => (d ? d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '
 const sgn = m => (m >= 0.5 ? `+${Math.round(m)}` : m <= -0.5 ? `${Math.round(m)}` : '±0');
 const cls = m => (m >= 5 ? 'late' : m >= 1 ? 'minor' : 'ontime');
 const addMin = (d, m) => new Date(+d + m * 60000);
+const same = (a, b) => a && b && Math.abs(a - b) < 30000;
 const store = { get: (k, f) => { try { return JSON.parse(localStorage.getItem(k)) ?? f; } catch { return f; } }, set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
 const MODES = { car: ['🚗', 'Auto'], bike: ['🚲', 'Rad'], foot: ['🚶', 'zu Fuß'] };
 
@@ -77,7 +78,7 @@ function placeBase() {
   homeMarker = reg(mk(el('me', '🏠 Koloniestraße 26'), S.home), S.home, 1, { essential: true });
   layout();
 }
-function planTimes(p) { return p ? `${fmt(p.plannedDep)} → <b style="color:#fca5a5">${fmt(p.depT)}</b>` : ''; }
+function planTimes(p) { return p ? (same(p.plannedDep, p.depT) ? `<b>${fmt(p.depT)}</b>` : `${fmt(p.plannedDep)} → <b style="color:#fca5a5">${fmt(p.depT)}</b>`) : ''; }
 
 async function loadHome() {
   if (store.get('zr.homeok', false)) return;
@@ -180,7 +181,7 @@ function render() {
   $('tag').className = 'glass tag' + (S.board ? ' open' : '');
   $('tag').innerHTML = `
   <div class="row top"><span class="badge">${dep.line}</span><span class="dir">→ ${dep.direction}</span><span class="plat">Gl. ${dep.platform}</span><span class="chev">${S.board ? '⌄' : '⌃'}</span></div>
-  <div class="times"><span class="big ${dep.cancelled ? 'late' : cls(dMin)}">${dep.cancelled ? 'fällt aus' : fmt(p?.depT || dep.actual || dep.planned)}</span>${dep.cancelled ? '' : `<s>${fmt(p?.plannedDep || dep.planned)}</s><span class="chip ${cls(dMin)}">${sgn(dMin)} min</span>`}</div>
+  <div class="times"><span class="big ${dep.cancelled ? 'late' : cls(dMin)}">${dep.cancelled ? 'fällt aus' : fmt(p?.depT || dep.actual || dep.planned)}</span>${dep.cancelled ? '' : `${same(p?.plannedDep || dep.planned, p?.depT || dep.actual || dep.planned) ? '' : `<s>${fmt(p?.plannedDep || dep.planned)}</s>`}<span class="chip ${cls(dMin)}">${Math.abs(dMin) < 0.5 ? 'pünktlich' : sgn(dMin) + ' min'}</span>`}</div>
   <div class="sub">${leave ? `Spätestens los <b>${fmt(leave)}</b> · ${MODES[S.mode][0]} ${walkMin} min` : 'Weg wird berechnet …'}</div>
   <div id="prog"></div>`;
   renderBoard(list, i, dep, p);
@@ -199,7 +200,7 @@ function renderBoard(list, i, dep, p) {
   }).join('');
   const kv = (k, v) => `<div><span>${k}</span><span>${v}</span></div>`;
   const details = [
-    p && kv('Ankunft plan / erwartet', `${fmt(p.plannedArr)} / <b>${fmt(p.arr)}</b>`),
+    p && kv('Ankunft', same(p.plannedArr, p.arr) ? `<b>${fmt(p.arr)}</b>` : `${fmt(p.plannedArr)} → <b>${fmt(p.arr)}</b>`),
     p && kv('Prognose', p.e.basis),
     dep.trainNo && kv('Zug', `${dep.category || ''} ${dep.trainNo}`),
     dep.plannedPlatform && dep.platform !== dep.plannedPlatform && kv('Gleiswechsel', `<span class="late">Gl. ${dep.platform} statt ${dep.plannedPlatform}</span>`),
@@ -214,7 +215,7 @@ function renderBoard(list, i, dep, p) {
 
 function bar(icon, left, right, frac, tone) {
   const w = Math.round(frac * 100);
-  return `<div class="prog"><div class="pl"><span>${icon} ${left}</span><span>${right}</span></div><div class="track ${tone}"><i style="width:${w}%"></i><u style="left:${w}%"></u></div></div>`;
+  return `<div class="pbar t-${tone}"><i style="width:${w}%${w ? '' : ';border-right-width:0'}"></i><span class="pl1">${icon} ${left}</span><span class="pr1">${right}</span></div>`;
 }
 function fillProg() {
   const box = $('prog'); if (!box) return;
@@ -223,14 +224,14 @@ function fillProg() {
     const dep = S.tr.dep, st = S.tr.raw.start, name = st?.name || startName(dep) || 'Start';
     const tStart = st?.dep || S.tr.stops[0]?.dep || S.tr.stops[0]?.arr;
     const f = timeProgress(tStart, p.arr, now);
-    const arrTxt = `Mering St Afra <b>${fmt(p.arr)}</b>${now < p.arr ? ` · in ${minutesUntil(p.arr, now)} min` : ' · da'}`;
-    parts.push(bar('🚆', name.replace(/ Hbf.*/, ' Hbf'), arrTxt, f ?? 0, cls(p.e.min)));
+    const arrTxt = `🚉 <b>${fmt(p.arr)}</b>${now < p.arr ? ` · ${minutesUntil(p.arr, now)} min` : ' · da'}`;
+    parts.push(bar("🚆", name, arrTxt, f ?? 0, cls(p.e.min)));
   }
   if (S.me && S.walk) {
     const eta = new Date(+now + S.walk.seconds * 1000), f = distProgress(S.trackTotal, S.walk.meters);
     const buf = p ? buffer(p.depT, eta) : null;
-    const bufTxt = buf == null ? '' : buf >= 0 ? ` · <b class="ontime">${buf} min Puffer</b>` : ` · <b class="late">${-buf} min zu spät</b>`;
-    parts.push(bar('📍', 'Du', `Mering St Afra <b>${fmt(eta)}</b> · in ${Math.ceil(S.walk.seconds / 60)} min${bufTxt}`, f, buf != null && buf < 0 ? 'late' : 'me'));
+    const bufTxt = buf == null ? '' : buf >= 0 ? ` · <b class="ontime">+${buf}</b>` : ` · <b class="late">${buf}</b>`;
+    parts.push(bar('📍', 'Du', `🚉 <b>${fmt(eta)}</b> · ${Math.ceil(S.walk.seconds / 60)} min${bufTxt}`, f, buf != null && buf < 0 ? 'late' : 'me'));
   } else parts.push(`<button class="gpsbtn" id="gpsbtn">📍 Live-Standort einschalten</button>`);
   box.innerHTML = parts.join('');
   const g = $('gpsbtn'); if (g) g.onclick = e => { e.stopPropagation(); startTracking(); };
