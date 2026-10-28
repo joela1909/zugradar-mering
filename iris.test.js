@@ -23,6 +23,6 @@ test('Zeit (Sommer-/Winterzeit)', () => {
   assert.equal(parseTime('2607011200').toISOString(), '2026-07-01T10:00:00.000Z'); // CEST = UTC+2
   assert.equal(planPath(new Date('2026-10-28T17:10:00Z')), '261028/18');
 });
-test('Bahnhofssuche', () => assert.equal(parseStations('<stations><station name="Mering St Afra" eva="8004052" ds100="MMS"/></stations>')[0].eva, '8004052'));
+test('Bahnhofssuche', () => assert.equal(parseStations('<stations><station name="Mering-St Afra" eva="8004052" ds100="MMS"/></stations>')[0].eva, '8004052'));
 test('Stopover', () => { const s = parseTimetable(plan)[0]; const o = toStopover('X', '1', { latitude: 1, longitude: 2 }, s); assert.equal(o.departureDelay, 0); assert.equal(o.plannedArrival, '2026-10-28T17:09:00.000Z'); });
 test('misc', () => { assert.equal(decode('a&amp;b'), 'a&b'); assert.equal(tripKey('-1-2610281752-5'), '-1-2610281752'); });

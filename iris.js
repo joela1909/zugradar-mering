@@ -61,7 +61,7 @@ export const tripKey = id => (id || '').replace(/-\d+$/, '');
 
 export function toDepartures(stops, eva, now = new Date()) {
   const seen = new Set();
-  return stops.filter(s => !seen.has(s.id) && seen.add(s.id)).filter(s => s.dp?.pt).map(s => {
+  return stops.filter(s => !seen.has(s.id) && seen.add(s.id)).filter(s => s.dp?.pt && !/^bus$/i.test(s.tl?.c || '')).map(s => {
     const planned = parseTime(s.dp.pt), actual = parseTime(s.dp.ct || s.dp.pt);
     const path = splitPath(s.dp.ppth);
     return {

@@ -59,7 +59,7 @@ async function locateAddress(query) {
 async function locations(env, q) {
   const query = (q.get('query') || '').trim();
   const words = query.toLowerCase().split(/[\s.-]+/).filter(Boolean);
-  const variants = [...new Set([query, query.replace(/\s+/g, '-'), query.replace(/\bSt\.?\s*/i, 'St. '), words.slice(0, 2).join(' '), words[0]].filter(Boolean))];
+  const variants = [...new Set([query.replace(' ', '-'), query, query.replace(/\s+/g, '-'), query.replace(/\bSt\.?\s*/i, 'St. '), words.slice(0, 2).join(' '), words[0]].filter(Boolean))];
   const tried = [], found = new Map();
   for (const v of variants) {
     const list = await station(env, v).catch(e => { tried.push(`${v}: ${e.message}`); return []; });
