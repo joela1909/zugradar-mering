@@ -20,11 +20,11 @@ const store = { get: (k, f) => { try { return JSON.parse(localStorage.getItem(k)
 const MODES = { car: ['🚗', 'Auto'], bike: ['🚲', 'Rad'], foot: ['🚶', 'zu Fuß'] };
 
 let liveError = '';
-const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home2', HOME_FALLBACK), mode: store.get('zr.mode2', 'car'), walk: null, trainMarker: null, board: false, markers: [], dir: store.get('zr.dir', 'muenchen'), me: null, meMarker: null, track: store.get('zr.track', false), trackTotal: 0, watch: null, lastRoute: { ll: null, t: 0 } };
+const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home2', HOME_FALLBACK), mode: store.get('zr.mode2', 'car'), walk: null, trainMarker: null, board: false, d3: store.get('zr.3d', true), markers: [], dir: store.get('zr.dir', 'muenchen'), me: null, meMarker: null, track: store.get('zr.track', false), trackTotal: 0, watch: null, lastRoute: { ll: null, t: 0 } };
 const vis = () => S.deps.filter(d => matchesDir(d, S.dir));
 const DIRS = { muenchen: 'München', augsburg: 'Augsburg' };
 
-const map = new maplibregl.Map({ container: 'map', style: 'https://tiles.openfreemap.org/styles/positron', center: S.station.lonlat, zoom: 12, attributionControl: { compact: true } });
+const map = new maplibregl.Map({ container: 'map', style: 'https://tiles.openfreemap.org/styles/positron', center: S.station.lonlat, zoom: 12, pitch: store.get('zr.3d', true) ? 55 : 0, maxPitch: 75, attributionControl: { compact: true } });
 const BLANK = { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#e8edf1' } }] };
 const mapReady = new Promise(r => {
   let done = false; const go = () => { if (!done) { done = true; r(); } };
@@ -34,9 +34,27 @@ const mapReady = new Promise(r => {
 
 const emptyFC = { type: 'FeatureCollection', features: [] };
 const lineFeat = (c, p = {}) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: c }, properties: p });
+// 3D-Gebäude (OpenMapTiles-Schema) + weiches Licht, wie in Apple Karten
+function add3D() {
+  try {
+    const src = Object.entries(map.getStyle().sources).find(([, v]) => v.type === 'vector')?.[0];
+    if (!src || map.getLayer('buildings-3d')) return;
+    map.addLayer({
+      id: 'buildings-3d', type: 'fill-extrusion', source: src, 'source-layer': 'building', minzoom: 13.5,
+      paint: {
+        'fill-extrusion-color': ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 6], 0, '#e9e9ee', 30, '#dcdce3', 80, '#cfcfd8'],
+        'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 13.5, 0, 15, ['coalesce', ['get', 'render_height'], 6]],
+        'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'], 13.5, 0, 15, ['coalesce', ['get', 'render_min_height'], 0]],
+        'fill-extrusion-opacity': 0.92, 'fill-extrusion-vertical-gradient': true,
+      },
+    });
+    map.setLight({ anchor: 'viewport', color: '#ffffff', intensity: 0.32, position: [1.25, 210, 55] });
+  } catch (e) { console.warn('3D-Gebäude nicht verfügbar', e); }
+}
 async function ensureLayers() {
   await mapReady;
   if (map.getSource('rail')) return;
+  add3D();
   map.addSource('rail', { type: 'geojson', data: emptyFC });
   map.addSource('walk', { type: 'geojson', data: emptyFC });
   map.addLayer({ id: 'walk-case', type: 'line', source: 'walk', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#fff', 'line-width': 9 } });
@@ -176,7 +194,7 @@ function fitAll() {
   b.extend(S.home); if (S.me) b.extend(S.me);
   S.walk?.coords.forEach(c => b.extend(c));
   if (S.tr) { b.extend(positionAt(S.tr, new Date()).pos); S.tr.polyline.forEach(c => b.extend(c)); }
-  map.fitBounds(b, { padding: { top: 80, bottom: (S.board ? 440 : 200), left: 70, right: 70 }, maxZoom: 15.5, duration: 800 });
+  map.fitBounds(b, { padding: { top: 80, bottom: (S.board ? 440 : 200), left: 70, right: 70 }, maxZoom: 15.5, duration: 800, pitch: S.d3 ? 55 : 0, bearing: 0 });
 }
 
 function prediction() {
@@ -318,7 +336,7 @@ function tick() {
   const pos = live ? S.tr.raw.currentLocation : p.pos;
   S.trainPos = pos;
   const d = S.tr.dep.delay ?? 0, html = `${S.tr.dep.line}${d >= 1 ? ` <b>+${Math.round(d)}</b>` : ''}`;
-  if (!S.trainMarker) S.trainMarker = new maplibregl.Marker({ element: el('trainmodel', TRAIN_SVG), anchor: 'center', rotationAlignment: 'map' }).setLngLat(pos).addTo(map);
+  if (!S.trainMarker) S.trainMarker = new maplibregl.Marker({ element: el('trainmodel', TRAIN_SVG), anchor: 'center', rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat(pos).addTo(map);
   S.trainMarker.setLngLat(pos).setRotation(p.bearing || 0);
   if (!S.trainLabel) { S.trainLabel = mk(el('lbl train-l', html), pos); labels.push({ marker: S.trainLabel, ll: pos, prio: 0, essential: true, trainLabel: true }); }
   const it = labels.find(l => l.trainLabel); if (it) it.ll = pos;
@@ -333,6 +351,9 @@ function logObservation() {
   store.set(k, true); record(p.key, p.liveDelay ?? 0);
 }
 
+const setD3 = () => { $('d3').classList.toggle('on', S.d3); $('d3').textContent = S.d3 ? '3D' : '2D'; };
+$('d3').onclick = () => { S.d3 = !S.d3; store.set('zr.3d', S.d3); setD3(); map.easeTo({ pitch: S.d3 ? 55 : 0, bearing: S.d3 ? map.getBearing() : 0, duration: 700 }); setTimeout(layout, 750); };
+setD3();
 $('refresh').onclick = refresh;
 $('fit').onclick = fitAll;
 
