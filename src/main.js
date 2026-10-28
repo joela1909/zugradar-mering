@@ -4,7 +4,7 @@ import './style.css';
 import * as api from './api.js';
 import { prepare, positionAt } from './train.js';
 import { expectedDelay, record, histKey } from './predict.js';
-import { dist } from './geo.js';
+import { dist, splitRoute } from './geo.js';
 import { createTrainLayer } from './train3d.js';
 import { dirOf, matchesDir, startName, timeProgress, distProgress, minutesUntil, buffer, stopFractions, livery } from './progress.js';
 
@@ -21,7 +21,7 @@ const store = { get: (k, f) => { try { return JSON.parse(localStorage.getItem(k)
 const MODES = { car: ['🚗', 'Auto'], bike: ['🚲', 'Rad'], foot: ['🚶', 'zu Fuß'] };
 
 let liveError = '';
-const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home2', HOME_FALLBACK), mode: store.get('zr.mode2', 'car'), walk: null, trainMarker: null, board: false, fitFull: false, d3: store.get('zr.3d', true), markers: [], dir: store.get('zr.dir', 'muenchen'), me: null, meMarker: null, track: store.get('zr.track', false), trackTotal: 0, watch: null, lastRoute: { ll: null, t: 0 } };
+const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home2', HOME_FALLBACK), mode: store.get('zr.mode2', 'car'), walk: null, trainMarker: null, board: false, fitFull: false, nav: false, follow: true, walkRemain: null, wake: null, d3: store.get('zr.3d', true), markers: [], dir: store.get('zr.dir', 'muenchen'), me: null, meMarker: null, track: store.get('zr.track', false), trackTotal: 0, watch: null, lastRoute: { ll: null, t: 0 } };
 const vis = () => S.deps.filter(d => matchesDir(d, S.dir));
 const DIRS = { muenchen: 'München', augsburg: 'Augsburg' };
 
@@ -93,7 +93,7 @@ async function ensureLayers() {
   map.addSource('rail', { type: 'geojson', data: emptyFC });
   map.addSource('walk', { type: 'geojson', data: emptyFC });
   map.addLayer({ id: 'walk-case', type: 'line', source: 'walk', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#fff', 'line-width': 9 } });
-  map.addLayer({ id: 'walk', type: 'line', source: 'walk', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#0066cc', 'line-width': 5 } });
+  map.addLayer({ id: 'walk', type: 'line', source: 'walk', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['coalesce', ['get', 'color'], '#0066cc'], 'line-width': 5 } });
   map.addLayer({ id: 'rail-glow', type: 'line', source: 'rail', paint: { 'line-color': ['get', 'color'], 'line-width': 12, 'line-opacity': .2, 'line-blur': 6 } });
   map.addLayer({ id: 'rail-case', type: 'line', source: 'rail', paint: { 'line-color': '#fff', 'line-width': 6 } });
   map.addLayer({ id: 'rail', type: 'line', source: 'rail', paint: { 'line-color': ['get', 'color'], 'line-width': 3.4 } });
@@ -162,12 +162,19 @@ async function loadHome() {
   try { S.home = await api.geocode(HOME_ADDRESS); store.set('zr.home2', S.home); store.set('zr.homeok', true); } catch (e) { console.warn('Adresssuche fehlgeschlagen', e); }
 }
 
+function drawWalk() {
+  const src = map.getSource('walk'); if (!src || !S.walk) return;
+  const r = S.nav && S.me ? splitRoute(S.walk.coords, S.me) : null;
+  src.setData(r ? { type: 'FeatureCollection', features: [lineFeat(r.done, { color: '#8e8e93' }), lineFeat(r.rest, { color: '#0a84ff' })] } : lineFeat(S.walk.coords));
+}
+const remainM = () => S.walkRemain ?? S.walk?.meters ?? 0;
+const remainS = () => (S.walk ? S.walk.seconds * (S.walk.meters ? remainM() / S.walk.meters : 1) : 0);
 async function loadWalk() {
   await ensureLayers();
   const from = S.me || S.home;
   try { S.walk = await api.route(S.mode, from, S.station.lonlat); }
   catch { const m = dist(from, S.station.lonlat) * 1.3; S.walk = { coords: [from, S.station.lonlat], meters: m, seconds: m / ({ foot: 1.33, bike: 4.2, car: 11 }[S.mode]) }; }
-  map.getSource('walk').setData(lineFeat(S.walk.coords));
+  S.walkRemain = null; drawWalk();
   S.lastRoute = { ll: from, t: Date.now() };
   if (S.me && (!S.trackTotal || S.walk.meters > S.trackTotal)) S.trackTotal = S.walk.meters;
   labels = labels.filter(l => l.marker !== walkMarker);
@@ -242,6 +249,7 @@ async function refineRail(tr, tripId) {
 }
 
 function fitAll() {
+  if (S.nav && S.follow) return;
   const b = new maplibregl.LngLatBounds(S.station.lonlat, S.station.lonlat);
   b.extend(S.home); if (S.me) b.extend(S.me);
   S.walk?.coords.forEach(c => b.extend(c));
@@ -267,15 +275,26 @@ function render() {
   const list = vis(), i = list.findIndex(d => d.tripId === S.sel), dep = list[i];
   $('board').hidden = !S.board;
   if (!dep) { $('tag').className = 'glass tag'; $('tag').innerHTML = `<div class="sub">Keine Abfahrten Richtung ${DIRS[S.dir]} gefunden.</div>`; $('board').hidden = true; return; }
-  const p = prediction(), walkMin = S.walk ? Math.ceil(S.walk.seconds / 60) : null;
+  const p = prediction(), walkMin = S.walk ? Math.ceil(remainS() / 60) : null;
   const dMin = dep.cancelled ? 0 : (p ? p.e.min : dep.delay ?? 0);
   const leave = p && walkMin != null ? addMin(p.depT, -walkMin - 1) : null;
-  $('tag').className = 'glass tag' + (S.board ? ' open' : '');
-  $('tag').innerHTML = `
+  $('tag').className = 'glass tag' + (S.board ? ' open' : '') + (S.nav ? ' navtag' : '');
+  const canNav = !!S.walk && (S.mode === 'car' || S.mode === 'bike' || S.mode === 'foot');
+  const eta = S.walk ? new Date(Date.now() + remainS() * 1000) : null;
+  $('tag').innerHTML = S.nav ? `
+  <div class="row top"><span class="navico">${MODES[S.mode][0]}</span><span class="dir">Fahrt zum Bahnhof Mering-St Afra</span>${S.follow ? '' : '<button class="pillbtn" id="recenter">Zentrieren</button>'}</div>
+  <div class="times"><span class="big">${fmt(eta)}</span><span class="chip">${Math.ceil(remainS() / 60)} min</span><span class="sub" style="margin-left:auto">${(remainM() / 1000).toFixed(1)} km</span></div>
+  <div class="sub">${p && leave ? `Zug ${dep.line} ab <b>${fmt(p.depT)}</b>${dep.delay >= 1 ? ` (+${Math.round(dep.delay)})` : ''}` : ''}</div>
+  <div id="prog"></div>
+  <button class="navbtn end" id="navend">Beenden</button>` : `
   <div class="row top"><span class="badge">${dep.line}</span><span class="dir">→ ${dep.direction}</span><span class="plat">Gl. ${dep.platform}</span><span class="chev">${S.board ? '⌄' : '⌃'}</span></div>
   <div class="times"><span class="big ${dep.cancelled ? 'late' : cls(dMin)}">${dep.cancelled ? 'fällt aus' : fmt(p?.depT || dep.actual || dep.planned)}</span>${dep.cancelled ? '' : `${same(p?.plannedDep || dep.planned, p?.depT || dep.actual || dep.planned) ? '' : `<s>${fmt(p?.plannedDep || dep.planned)}</s>`}<span class="chip ${cls(dMin)}">${Math.abs(dMin) < 0.5 ? 'pünktlich' : sgn(dMin) + ' min'}</span>`}</div>
   <div class="sub">${leave ? `Spätestens los <b>${fmt(leave)}</b> · ${MODES[S.mode][0]} ${walkMin} min` : 'Weg wird berechnet …'}</div>
-  <div id="prog"></div>`;
+  <div id="prog"></div>
+  ${canNav ? `<button class="navbtn" id="navstart">${MODES[S.mode][0]} Route starten</button>` : ''}`;
+  const ns = $('navstart'); if (ns) ns.onclick = e => { e.stopPropagation(); startNav(); };
+  const ne = $('navend'); if (ne) ne.onclick = e => { e.stopPropagation(); stopNav(); };
+  const rc = $('recenter'); if (rc) rc.onclick = e => { e.stopPropagation(); S.follow = true; render(); updateNav(); };
   renderBoard(list, i, dep, p);
   fillProg();
   requestAnimationFrame(() => document.documentElement.style.setProperty('--tagh', $('tag').offsetHeight + 'px'));
@@ -333,10 +352,10 @@ function fillProg() {
     parts.push(bar("🚆", name, arrTxt, f ?? 0, cls(p.e.min), tStart ? trainStops(dep, tStart, p.arr) : []));
   }
   if (S.me && S.walk) {
-    const eta = new Date(+now + S.walk.seconds * 1000), f = distProgress(S.trackTotal, S.walk.meters);
+    const eta = new Date(+now + remainS() * 1000), f = distProgress(S.trackTotal, remainM());
     const buf = p ? buffer(p.depT, eta) : null;
     const bufTxt = buf == null ? '' : buf >= 0 ? ` · <b class="ontime">+${buf}</b>` : ` · <b class="late">${buf}</b>`;
-    parts.push(bar('📍', 'Du', `🚉 <b>${fmt(eta)}</b> · ${Math.ceil(S.walk.seconds / 60)} min${bufTxt}`, f, buf != null && buf < 0 ? 'late' : 'me'));
+    parts.push(bar('📍', 'Du', `🚉 <b>${fmt(eta)}</b> · ${Math.ceil(remainS() / 60)} min${bufTxt}`, f, buf != null && buf < 0 ? 'late' : 'me'));
   } else parts.push(`<button class="gpsbtn" id="gpsbtn">📍 Live-Standort einschalten</button>`);
   box.innerHTML = parts.join('');
   const g = $('gpsbtn'); if (g) g.onclick = e => { e.stopPropagation(); startTracking(); };
@@ -348,14 +367,45 @@ function onFix(pos) {
   S.me = ll;
   if (!S.meMarker) S.meMarker = mk(el('gps', ''), ll); else S.meMarker.setLngLat(ll);
   const moved = S.lastRoute.ll ? dist(S.lastRoute.ll, ll) : Infinity;
-  if (first || moved > 120 || Date.now() - S.lastRoute.t > 45000) loadWalk().then(() => { render(); layout(); if (first) fitAll(); });
-  else fillProg();
+  const r = S.nav && S.walk ? splitRoute(S.walk.coords, ll) : null;
+  const off = r && r.off > 45;                       // von der Route abgekommen → neu berechnen
+  if (r) { S.walkRemain = r.remaining; drawWalk(); }
+  if (first || off || (!S.nav && (moved > 120 || Date.now() - S.lastRoute.t > 45000))) loadWalk().then(() => { if (S.nav) updateNav(pos); render(); layout(); if (first && !S.nav) fitAll(); });
+  else { fillProg(); if (S.nav) updateNav(pos, r); }
+  if (S.nav && dist(ll, S.station.lonlat) < 70) { stopNav(); }
 }
+
+// ---- Navigation: Karte folgt dir, geneigt und nach vorn gedreht, ohne Abbiegehinweise ----
+function updateNav(pos, r) {
+  if (!S.nav || !S.me || !S.follow) return;
+  r ||= S.walk ? splitRoute(S.walk.coords, S.me) : null;
+  const speed = pos?.coords?.speed ?? 0, gpsHeading = pos?.coords?.heading;
+  const brg = r && r.off < 60 ? r.bearing : (speed > 1.5 && gpsHeading != null && !Number.isNaN(gpsHeading) ? gpsHeading : map.getBearing());
+  map.easeTo({ center: S.me, zoom: 17, pitch: 62, bearing: brg, duration: 900, easing: t => t, padding: { top: 120, bottom: Math.round(innerHeight * .32), left: 20, right: 20 } });
+}
+async function startNav() {
+  S.nav = true; S.follow = true; document.body.classList.add('nav');
+  if (S.watch == null) startTracking();
+  try { S.wake = await navigator.wakeLock?.request('screen'); } catch {}
+  S.board = false; render();
+  if (S.me) { await loadWalk(); updateNav(); } // sonst übernimmt der erste GPS-Fix
+}
+function stopNav() {
+  S.nav = false; document.body.classList.remove('nav');
+  try { S.wake?.release(); } catch {} S.wake = null;
+  map.easeTo({ padding: { top: 0, bottom: 0, left: 0, right: 0 }, duration: 500 });
+  drawWalk(); render(); fitAll();
+}
+map.on('dragstart', () => { if (S.nav) { S.follow = false; render(); } });
+document.addEventListener('visibilitychange', async () => { if (document.visibilityState === 'visible' && S.nav) { try { S.wake = await navigator.wakeLock?.request('screen'); } catch {} } });
 function startTracking() {
   if (!navigator.geolocation) { alert('Standort wird von diesem Browser nicht unterstützt.'); return; }
   if (S.watch != null) return;
   S.track = true; store.set('zr.track', true); $('gps').classList.add('on');
-  S.watch = navigator.geolocation.watchPosition(onFix, e => { console.warn(e); stopTracking(); alert('Standort nicht verfügbar. Bitte in den Browser-Einstellungen erlauben.'); }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+  S.watch = navigator.geolocation.watchPosition(onFix, e => {
+    console.warn('GPS', e.code, e.message);
+    if (e.code === 1) { stopNav(); stopTracking(); alert('Standort nicht erlaubt. Bitte in den Einstellungen für diese Seite freigeben.'); } // nur bei verweigerter Berechtigung beenden; Zeitlimit/Funkloch ignorieren
+  }, { enableHighAccuracy: true, maximumAge: 5000 });
 }
 function stopTracking() {
   if (S.watch != null) navigator.geolocation.clearWatch(S.watch);
@@ -363,7 +413,7 @@ function stopTracking() {
   S.meMarker?.remove(); S.meMarker = null; S.me = null; S.trackTotal = 0;
   loadWalk().then(() => { render(); layout(); });
 }
-$('gps').onclick = () => (S.watch != null ? stopTracking() : startTracking());
+$('gps').onclick = () => { if (S.nav) { S.follow = true; render(); updateNav(); return; } S.watch != null ? stopTracking() : startTracking(); };
 
 // ---- Richtung ----
 function updateDirUI() { document.querySelectorAll('#dirctl button').forEach(b => b.classList.toggle('on', b.dataset.d === S.dir)); }

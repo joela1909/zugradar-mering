@@ -125,3 +125,10 @@ html,body{background:var(--land)}
 .pbar .tk.end.p{background:var(--ink)}
 .pbar i{border-right-width:0;border-radius:14px 0 0 14px}
 .tklabels{margin:4px 0 -2px}
+
+/* Navigation */
+.navbtn{display:block;width:100%;margin-top:12px;padding:13px;border-radius:14px;background:var(--blue);color:#fff;font-size:16px;font-weight:600;letter-spacing:-.01em}
+.navbtn.end{background:var(--fill);color:var(--bad)}
+.navico{font-size:22px}
+body.nav .dirctl,body.nav .status{display:none}
+.tag.navtag .big{font-size:40px}

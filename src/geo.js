@@ -27,3 +27,20 @@ export function bearing(a, b) {
   const x = Math.cos(rad(a[1])) * Math.sin(rad(b[1])) - Math.sin(rad(a[1])) * Math.cos(rad(b[1])) * Math.cos(rad(b[0] - a[0]));
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
+
+/** Nächster Punkt auf einer Linie: Abstand, Reststrecke, Richtung und Aufteilung in gefahren/übrig. line: [[lon,lat]] */
+export function splitRoute(line, p) {
+  if (!line || line.length < 2) return null;
+  const cum = cumulative(line);
+  let best = { d: Infinity, i: 0, t: 0, pt: line[0] };
+  for (let i = 0; i < line.length - 1; i++) {
+    const a = line[i], b = line[i + 1], k = Math.cos(rad(a[1]));
+    const ax = a[0] * k, bx = b[0] * k, px = p[0] * k, dx = bx - ax, dy = b[1] - a[1], len2 = dx * dx + dy * dy;
+    const t = len2 ? Math.max(0, Math.min(1, ((px - ax) * dx + (p[1] - a[1]) * dy) / len2)) : 0;
+    const pt = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t], d = dist(pt, p);
+    if (d < best.d) best = { d, i, t, pt };
+  }
+  const along = cum[best.i] + dist(line[best.i], best.pt), total = cum[cum.length - 1];
+  const ahead = pointAt(line, cum, Math.min(total, along + 40));
+  return { off: best.d, along, remaining: Math.max(0, total - along), total, done: [...line.slice(0, best.i + 1), best.pt], rest: [best.pt, ...line.slice(best.i + 1)], bearing: bearing(best.pt, ahead) };
+}
