@@ -16,6 +16,8 @@ export async function findStation() {
   return { id: s.id, name: s.name, lonlat: [s.location.longitude, s.location.latitude] };
 }
 
+export async function geocode(q) { const r = await j(`${BASE}/geocode?q=${encodeURIComponent(q)}`); return [r.longitude, r.latitude]; }
+
 export async function departures(station) {
   const r = await j(`${BASE}/stops/${station.id}/departures?duration=150&results=14&language=de&remarks=false`);
   return r.departures.map(d => ({

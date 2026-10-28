@@ -46,6 +46,16 @@ async function locate(name) {
   return JSON.parse(text);
 }
 
+async function locateAddress(query) {
+  const text = await cached('addr:' + query, 2592000, async () => {
+    const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=1&lang=de&lat=${BIAS.lat}&lon=${BIAS.lon}`, { headers: { 'user-agent': UA } });
+    const f = r.ok && (await r.json()).features?.[0];
+    if (!f) throw new ApiError('Adresse nicht gefunden');
+    return JSON.stringify({ latitude: f.geometry.coordinates[1], longitude: f.geometry.coordinates[0] });
+  });
+  return JSON.parse(text);
+}
+
 async function locations(env, q) {
   const list = await station(env, q.get('query') || '');
   const out = [];
@@ -93,6 +103,7 @@ export default {
     const path = url.pathname.slice(4), q = url.searchParams;
     try {
       let m;
+      if (path === '/geocode') return json(await locateAddress(q.get('q') || ''), 200, 86400);
       if (path === '/locations') return json(await locations(env, q), 200, 3600);
       if ((m = path.match(/^\/stops\/([^/]+)\/departures$/))) return json(await departures(env, decodeURIComponent(m[1]), q));
       if ((m = path.match(/^\/trips\/(.+)$/))) return json(await trip(env, decodeURIComponent(m[1])));

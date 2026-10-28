@@ -6,108 +6,124 @@ import { prepare, positionAt } from './train.js';
 import { expectedDelay, record, histKey } from './predict.js';
 import { dist } from './geo.js';
 
+const HOME_ADDRESS = 'Koloniestraße 26, 86399 Bobingen';
+const HOME_FALLBACK = [10.8330, 48.2730]; // Bobingen (Mitte), falls die Adressuche nicht klappt
+
 const $ = id => document.getElementById(id);
 const fmt = d => (d ? d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '–');
-const sgn = m => (m > 0.5 ? `+${Math.round(m)} min` : m < -0.5 ? `${Math.round(m)} min` : 'pünktlich');
+const sgn = m => (m >= 0.5 ? `+${Math.round(m)}` : m <= -0.5 ? `${Math.round(m)}` : '±0');
 const cls = m => (m >= 5 ? 'late' : m >= 1 ? 'minor' : 'ontime');
 const addMin = (d, m) => new Date(+d + m * 60000);
 const store = { get: (k, f) => { try { return JSON.parse(localStorage.getItem(k)) ?? f; } catch { return f; } }, set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
+const MODES = { car: ['🚗', 'Auto'], bike: ['🚲', 'Rad'], foot: ['🚶', 'zu Fuß'] };
 
 let liveError = '';
-const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home', null), mode: store.get('zr.mode', 'foot'), walk: null, trainMarker: null };
+const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home2', HOME_FALLBACK), mode: store.get('zr.mode2', 'car'), walk: null, trainMarker: null, open: false, markers: [] };
 
-const map = new maplibregl.Map({ container: 'map', style: 'https://tiles.openfreemap.org/styles/positron', center: S.station.lonlat, zoom: 13.5, attributionControl: { compact: true } });
-map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+const map = new maplibregl.Map({ container: 'map', style: 'https://tiles.openfreemap.org/styles/positron', center: S.station.lonlat, zoom: 12, attributionControl: { compact: true } });
 const BLANK = { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#e8edf1' } }] };
 const mapReady = new Promise(r => {
   let done = false; const go = () => { if (!done) { done = true; r(); } };
   map.on('load', go);
-  map.on('error', e => { if (!done && !map.isStyleLoaded()) { console.warn('Kartenstil nicht ladbar, nutze leeren Hintergrund', e.error); map.setStyle(BLANK); map.once('styledata', go); } });
+  map.on('error', e => { if (!done && !map.isStyleLoaded()) { console.warn('Kartenstil nicht ladbar', e.error); map.setStyle(BLANK); map.once('styledata', go); } });
 });
 
 const emptyFC = { type: 'FeatureCollection', features: [] };
-const lineFeat = c => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: c }, properties: {} });
+const lineFeat = (c, p = {}) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: c }, properties: p });
 async function ensureLayers() {
   await mapReady;
   if (map.getSource('rail')) return;
   map.addSource('rail', { type: 'geojson', data: emptyFC });
   map.addSource('walk', { type: 'geojson', data: emptyFC });
-  map.addLayer({ id: 'rail-glow', type: 'line', source: 'rail', paint: { 'line-color': '#e30613', 'line-width': 12, 'line-opacity': .18, 'line-blur': 6 } });
-  map.addLayer({ id: 'rail-case', type: 'line', source: 'rail', paint: { 'line-color': '#fff', 'line-width': 6 } });
-  map.addLayer({ id: 'rail', type: 'line', source: 'rail', paint: { 'line-color': '#e30613', 'line-width': 3.2 } });
-  map.addLayer({ id: 'rail-ties', type: 'line', source: 'rail', paint: { 'line-color': '#fff', 'line-width': 1.4, 'line-dasharray': [1, 3] } });
   map.addLayer({ id: 'walk-case', type: 'line', source: 'walk', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#fff', 'line-width': 9 } });
   map.addLayer({ id: 'walk', type: 'line', source: 'walk', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#2563eb', 'line-width': 5 } });
+  map.addLayer({ id: 'rail-glow', type: 'line', source: 'rail', paint: { 'line-color': ['get', 'color'], 'line-width': 12, 'line-opacity': .2, 'line-blur': 6 } });
+  map.addLayer({ id: 'rail-case', type: 'line', source: 'rail', paint: { 'line-color': '#fff', 'line-width': 6 } });
+  map.addLayer({ id: 'rail', type: 'line', source: 'rail', paint: { 'line-color': ['get', 'color'], 'line-width': 3.4 } });
+  map.addLayer({ id: 'rail-ties', type: 'line', source: 'rail', paint: { 'line-color': '#fff', 'line-width': 1.4, 'line-dasharray': [1, 3] } });
 }
 const el = (cn, html) => { const e = document.createElement('div'); e.className = cn; e.innerHTML = html; return e; };
-let stationMarker, homeMarker;
-function placeStation() {
-  stationMarker?.remove();
-  stationMarker = new maplibregl.Marker({ element: el('pin', '🚉 ' + S.station.name) }).setLngLat(S.station.lonlat).addTo(map);
+const mk = (element, ll, anchor = 'center') => new maplibregl.Marker({ element, anchor }).setLngLat(ll).addTo(map);
+let stationMarker, homeMarker, walkMarker;
+
+function placeBase() {
+  stationMarker?.remove(); homeMarker?.remove();
+  const st = S.tr?.stops?.find((_, i) => i === S.tr.stopIdx);
+  stationMarker = mk(el('pin', `🚉 ${S.station.name.replace(' (Demo)', '')}${st ? `<small>${planTimes(prediction())}</small>` : ''}`), S.station.lonlat, 'bottom');
+  homeMarker = mk(el('me', '🏠 Koloniestraße 26'), S.home, 'bottom');
 }
-function placeHome() {
-  homeMarker?.remove();
-  if (!S.home) return;
-  homeMarker = new maplibregl.Marker({ element: el('me', '') }).setLngLat(S.home).addTo(map);
+function planTimes(p) { return p ? `${fmt(p.plannedDep)} → <b style="color:#fca5a5">${fmt(p.depT)}</b>` : ''; }
+
+async function loadHome() {
+  if (store.get('zr.homeok', false)) return;
+  try { S.home = await api.geocode(HOME_ADDRESS); store.set('zr.home2', S.home); store.set('zr.homeok', true); } catch (e) { console.warn('Adresssuche fehlgeschlagen', e); }
 }
 
 async function loadWalk() {
   await ensureLayers();
-  if (!S.home) { S.walk = null; map.getSource('walk').setData(emptyFC); return; }
   try { S.walk = await api.route(S.mode, S.home, S.station.lonlat); }
-  catch { const m = dist(S.home, S.station.lonlat) * 1.3; S.walk = { coords: [S.home, S.station.lonlat], meters: m, seconds: m / ({ foot: 1.33, bike: 4.2, car: 9 }[S.mode]) }; }
+  catch { const m = dist(S.home, S.station.lonlat) * 1.3; S.walk = { coords: [S.home, S.station.lonlat], meters: m, seconds: m / ({ foot: 1.33, bike: 4.2, car: 11 }[S.mode]) }; }
   map.getSource('walk').setData(lineFeat(S.walk.coords));
+  walkMarker?.remove();
+  const mid = S.walk.coords[Math.floor(S.walk.coords.length / 2)];
+  walkMarker = mk(el('lbl route', `${MODES[S.mode][0]} ${Math.ceil(S.walk.seconds / 60)} min · ${(S.walk.meters / 1000).toFixed(1)} km`), mid);
 }
-function setHome(ll) { S.home = ll; store.set('zr.home', ll); placeHome(); loadWalk().then(renderDetail); }
 
 async function refresh() {
-  $('refresh').style.opacity = .5;
+  $('refresh').style.opacity = .4;
   try {
     try {
       if (!S.live) S.station = await api.findStation();
       S.deps = await api.departures(S.station); S.live = true; liveError = '';
     } catch (e) {
       console.warn('Live-Daten nicht erreichbar, Demo-Modus:', e);
-      liveError = String(e?.message || e).slice(0, 160);
+      liveError = String(e?.message || e).slice(0, 200);
       S.live = false; S.demo = api.demo(); S.station = S.demo.station; S.deps = S.demo.deps;
     }
-    $('mode').textContent = S.live ? 'LIVE' : 'DEMO'; $('mode').className = 'chip' + (S.live ? ' live' : '');
-    $('err').textContent = S.live ? '' : liveError; $('stName').textContent = S.station.name; placeStation();
-    if (!S.sel || !S.deps.find(d => d.tripId === S.sel)) S.sel = (S.deps.find(d => addMin(d.actual || d.planned, 1) > new Date() && !d.cancelled) || S.deps[0])?.tripId;
-    renderList();
+    $('mode').textContent = S.live ? 'LIVE' : 'DEMO'; $('mode').className = S.live ? 'live' : '';
+    $('err').textContent = S.live ? '' : liveError;
+    if (!S.sel || !S.deps.find(d => d.tripId === S.sel)) S.sel = pickDefault()?.tripId;
     await selectTrip(S.sel, false);
   } finally { $('refresh').style.opacity = 1; }
 }
 
-function renderList() {
-  $('list').innerHTML = S.deps.map(d => {
-    const m = d.delay ?? 0;
-    return `<button class="card ${d.tripId === S.sel ? 'sel' : ''}" data-id="${d.tripId}"><div class="l">${d.line} <span class="d">Gl. ${d.platform}</span></div>
-      <div class="t ${d.cancelled ? 'late' : cls(m)}">${d.cancelled ? 'fällt aus' : fmt(d.actual || d.planned)}${m >= 1 && !d.cancelled ? `<s>${fmt(d.planned)}</s>` : ''}</div>
-      <div class="d">→ ${d.direction}</div></button>`;
-  }).join('') || '<div class="note">Keine Abfahrten gefunden.</div>';
-  $('list').querySelectorAll('.card').forEach(b => b.onclick = () => selectTrip(b.dataset.id, true));
+function pickDefault() {
+  const now = new Date(), walkMin = S.walk ? Math.ceil(S.walk.seconds / 60) + 1 : 0;
+  const ok = S.deps.filter(d => !d.cancelled);
+  return ok.find(d => addMin(d.actual || d.planned, -walkMin) > now) || ok.find(d => addMin(d.actual || d.planned, 1) > now) || S.deps[0];
 }
 
 async function selectTrip(id, fit) {
-  S.sel = id; renderList();
-  const dep = S.deps.find(d => d.tripId === id); if (!dep) return;
+  S.sel = id;
+  const dep = S.deps.find(d => d.tripId === id);
   await ensureLayers();
+  S.markers.forEach(m => m.remove()); S.markers = [];
+  if (!dep) { S.tr = null; map.getSource('rail').setData(emptyFC); render(); return; }
   try {
     const t = S.live ? await api.trip(id, S.station) : await S.demo.trip(id);
     const stopIdx = t.stopovers.findIndex(s => (S.station.id && s.id === S.station.id) || /St\.? ?Afra/i.test(s.name));
     S.tr = { ...prepare(t.stopovers, t.polyline), raw: t, dep, stopIdx };
-    map.getSource('rail').setData(lineFeat(t.polyline));
-    if (fit) fitAll();
+    const worst = Math.max(0, ...t.stopovers.map(s => s.arrDelay ?? s.depDelay ?? 0));
+    const color = worst >= 5 ? '#dc2626' : worst >= 1 ? '#ea580c' : '#e30613';
+    map.getSource('rail').setData(lineFeat(t.polyline, { color }));
+    t.stopovers.forEach((s, i) => {
+      if (i === stopIdx || dist(s.lonlat, S.station.lonlat) < 900) return;
+      const d = s.arrDelay ?? s.depDelay ?? 0, tm = s.arr || s.dep;
+      const e = el('lbl', `${s.name}<br><i class="${cls(d)}">${fmt(tm)}${d >= 1 ? ' +' + Math.round(d) : ''}</i>`);
+      S.markers.push(mk(e, s.lonlat, i % 2 ? 'top' : 'bottom'));
+      S.markers.push(mk(el('dot', ''), s.lonlat));
+    });
   } catch (e) { console.warn(e); S.tr = null; map.getSource('rail').setData(emptyFC); }
-  renderDetail(); tick();
+  placeBase(); render(); tick();
+  if (fit) fitAll();
 }
 
 function fitAll() {
   const b = new maplibregl.LngLatBounds(S.station.lonlat, S.station.lonlat);
-  if (S.home) b.extend(S.home);
-  if (S.tr) { const p = positionAt(S.tr, new Date()); b.extend(p.pos); const near = S.tr.polyline.filter(c => dist(c, S.station.lonlat) < 6000); near.forEach(c => b.extend(c)); }
-  map.fitBounds(b, { padding: { top: 90, bottom: Math.min(470, innerHeight * .55), left: 50, right: 60 }, maxZoom: 15.5, duration: 800 });
+  b.extend(S.home);
+  S.walk?.coords.forEach(c => b.extend(c));
+  if (S.tr) { b.extend(positionAt(S.tr, new Date()).pos); S.tr.polyline.forEach(c => b.extend(c)); }
+  map.fitBounds(b, { padding: { top: 80, bottom: (S.open ? 300 : 160), left: 70, right: 70 }, maxZoom: 15.5, duration: 800 });
 }
 
 function prediction() {
@@ -120,43 +136,46 @@ function prediction() {
   const liveDelay = st.depDelay ?? st.arrDelay ?? dep.delay;
   const key = histKey(dep.line, plannedDep);
   let hist = []; try { hist = JSON.parse(localStorage.getItem('zugradar.history.v1'))?.[key] || []; } catch {}
-  const e = expectedDelay({ live: S.live ? liveDelay : liveDelay, stopsAway, hist });
-  return { st, plannedArr, plannedDep, liveDelay, stopsAway, e, key,
-    arr: addMin(plannedArr, e.min), depT: addMin(plannedDep, e.min) };
+  const e = expectedDelay({ live: liveDelay, stopsAway, hist });
+  return { plannedArr, plannedDep, liveDelay, stopsAway, e, key, arr: addMin(plannedArr, e.min), depT: addMin(plannedDep, e.min), platform: dep.platform };
 }
 
-function renderDetail() {
-  const dep = S.deps.find(d => d.tripId === S.sel), p = prediction();
-  if (!dep) { $('detail').innerHTML = ''; return; }
-  const walkMin = S.walk ? Math.ceil(S.walk.seconds / 60) : null;
+function render() {
+  const i = S.deps.findIndex(d => d.tripId === S.sel), dep = S.deps[i];
+  if (!dep) { $('tag').innerHTML = '<div class="sub">Keine Abfahrten gefunden.</div>'; return; }
+  const p = prediction(), walkMin = S.walk ? Math.ceil(S.walk.seconds / 60) : null;
+  const dMin = dep.cancelled ? 0 : (p ? p.e.min : dep.delay ?? 0);
   const leave = p && walkMin != null ? addMin(p.depT, -walkMin - 1) : null;
-  const segs = ['foot', 'bike', 'car'].map(m => `<button data-m="${m}" class="${S.mode === m ? 'on' : ''}">${{ foot: '🚶 zu Fuß', bike: '🚲 Rad', car: '🚗 Auto' }[m]}</button>`).join('');
-  $('detail').innerHTML = `<h3>${dep.line} → ${dep.direction}</h3>
-  <div class="grid">
-    <div class="box"><small>Abfahrt planmäßig</small><div class="v">${fmt(p?.plannedDep || dep.planned)}</div><div class="sub">Gleis ${dep.platform}</div></div>
-    <div class="box"><small>Abfahrt aktuell</small><div class="v ${cls(dep.delay ?? 0)}">${dep.cancelled ? 'fällt aus' : fmt(dep.actual || dep.planned)}</div><div class="sub">${dep.cancelled ? '' : sgn(dep.delay ?? 0)}</div></div>
-    ${p ? `<div class="box"><small>Ankunft erwartet</small><div class="v ${cls(p.e.min)}">${fmt(p.arr)}</div><div class="sub">plan ${fmt(p.plannedArr)} · ${sgn(p.e.min)}</div></div>
-    <div class="box"><small>Abfahrt erwartet</small><div class="v ${cls(p.e.min)}">${fmt(p.depT)}</div><div class="sub">${p.e.basis}</div></div>` : ''}
-  </div>
-  <div class="grid" style="margin-top:8px">
-    <div class="box"><small>Dein Weg</small><div class="v">${walkMin != null ? walkMin + ' min' : '–'}</div><div class="sub">${S.walk ? (S.walk.meters / 1000).toFixed(1) + ' km' : 'Langer Druck auf Karte = Startpunkt'}</div></div>
-    <div class="box"><small>Spätestens los</small><div class="v">${fmt(leave)}</div><div class="sub">inkl. 1 min Puffer</div></div>
-  </div>
-  <div class="seg">${segs}</div>
-  <div class="note">${S.live ? 'Live-Daten: DB (transport.rest). ' : `Demo-Daten – Live-Quelle nicht erreichbar${liveError ? ' (' + liveError + ')' : ''}. `}Erwartung = Live-Prognose gewichtet mit gespeicherter Historie; ${p ? p.stopsAway + ' Halt(e) bis hier.' : ''}</div>`;
-  $('detail').querySelectorAll('[data-m]').forEach(b => b.onclick = () => { S.mode = b.dataset.m; store.set('zr.mode', S.mode); loadWalk().then(renderDetail); });
+  const buffer = dep.delay >= 1 ? ` · Zug <b class="${cls(dep.delay)}">+${Math.round(dep.delay)} min</b> → so viel mehr Zeit` : '';
+  $('tag').className = 'glass tag' + (S.open ? ' open' : '');
+  $('tag').innerHTML = `
+  <div class="row top"><button class="nav" id="prev" ${i <= 0 ? 'disabled' : ''}>‹</button><span class="badge">${dep.line}</span><span class="dir">→ ${dep.direction}</span><button class="nav" id="next" ${i >= S.deps.length - 1 ? 'disabled' : ''}>›</button></div>
+  <div class="times"><span class="big ${dep.cancelled ? 'late' : cls(dMin)}">${dep.cancelled ? 'fällt aus' : fmt(p?.depT || dep.actual || dep.planned)}</span>${dep.cancelled ? '' : `<s>${fmt(p?.plannedDep || dep.planned)}</s><span class="d ${cls(dMin)}">${sgn(dMin)} min</span>`}<span class="sub" style="margin-left:auto">Gl. ${dep.platform}</span></div>
+  <div class="sub">${leave ? `Spätestens los <b>${fmt(leave)}</b> (${MODES[S.mode][0]} ${walkMin} min)` : 'Weg wird berechnet …'}${buffer}</div>
+  <div class="more">
+    ${p ? `<div><span>Ankunft planmäßig / erwartet</span><span>${fmt(p.plannedArr)} / <b>${fmt(p.arr)}</b></span></div>
+    <div><span>Abfahrt planmäßig / aktuell</span><span>${fmt(p.plannedDep)} / <b>${fmt(dep.actual || dep.planned)}</b></span></div>
+    <div><span>Prognose-Basis</span><span>${p.e.basis}</span></div>
+    <div><span>Halte bis hier</span><span>${p.stopsAway}</span></div>` : ''}
+    <div><span>Verkehrsmittel zum Bahnhof</span><span><button id="modebtn" style="background:var(--line);padding:2px 10px">${MODES[S.mode][0]} ${MODES[S.mode][1]} ⇄</button></span></div>
+    <div><span>Startpunkt</span><span>Koloniestraße 26, Bobingen</span></div>
+    <div><span>Quelle</span><span>${S.live ? 'DB Live' : 'Demo'}</span></div>
+  </div>`;
+  $('prev').onclick = e => { e.stopPropagation(); selectTrip(S.deps[i - 1].tripId, true); };
+  $('next').onclick = e => { e.stopPropagation(); selectTrip(S.deps[i + 1].tripId, true); };
+  const m = $("modebtn"); if (m) m.onclick = e => { e.stopPropagation(); const k = Object.keys(MODES); S.mode = k[(k.indexOf(S.mode) + 1) % k.length]; store.set('zr.mode2', S.mode); loadWalk().then(render); };
 }
+$('tag').onclick = () => { S.open = !S.open; render(); };
 
 function tick() {
   if (!S.tr) { S.trainMarker?.remove(); S.trainMarker = null; return; }
-  const raw = S.tr.raw, now = new Date();
-  const p = positionAt(S.tr, now);
-  const pos = S.live && raw.currentLocation && p.state === 'fährt' ? raw.currentLocation : p.pos;
-  if (!S.trainMarker) S.trainMarker = new maplibregl.Marker({ element: el('train', '🚆') }).setLngLat(pos).addTo(map);
-  else S.trainMarker.setLngLat(pos);
+  const now = new Date(), p = positionAt(S.tr, now);
+  const pos = S.live && S.tr.raw.currentLocation && p.state === 'fährt' ? S.tr.raw.currentLocation : p.pos;
+  const d = S.tr.dep.delay ?? 0, html = `<span>🚆</span>${S.tr.dep.line}${d >= 1 ? ` <b>+${Math.round(d)}</b>` : ''}`;
+  if (!S.trainMarker) S.trainMarker = mk(el('train', html), pos);
+  else { S.trainMarker.setLngLat(pos); S.trainMarker.getElement().innerHTML = html; }
 }
 
-// Beobachtung für Historie: einmal pro Zug & Tag, sobald er den Bahnhof verlassen hat
 function logObservation() {
   const p = prediction(); if (!p || !S.live) return;
   if (new Date() < addMin(p.plannedDep, (p.liveDelay ?? 0) + 1)) return;
@@ -166,10 +185,13 @@ function logObservation() {
 
 $('refresh').onclick = refresh;
 $('fit').onclick = fitAll;
-$('locate').onclick = () => navigator.geolocation?.getCurrentPosition(pos => { setHome([pos.coords.longitude, pos.coords.latitude]); fitAll(); }, () => alert('Standort nicht verfügbar – lang auf die Karte drücken, um den Startpunkt zu setzen.'), { enableHighAccuracy: true });
-map.on('contextmenu', e => setHome([e.lngLat.lng, e.lngLat.lat]));
 
-placeHome();
-refresh().then(async () => { await loadWalk(); renderDetail(); fitAll(); });
+(async () => {
+  await loadHome();
+  await refresh();
+  await loadWalk(); placeBase();
+  if (!S.sel || !S.deps.find(d => d.tripId === S.sel) || true) { const d = pickDefault(); if (d && d.tripId !== S.sel) await selectTrip(d.tripId, false); }
+  render(); fitAll();
+})();
 setInterval(tick, 1000);
 setInterval(() => { refresh().then(logObservation); }, 30000);
