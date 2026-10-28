@@ -7,7 +7,7 @@ const j = async (u, o) => {
 const D = s => (s ? new Date(s) : null);
 const minutes = s => (s == null ? null : s / 60);
 
-export const FALLBACK_STATION = { id: null, name: 'Mering St Afra', lonlat: [10.9870, 48.2730], approx: true };
+export const FALLBACK_STATION = { id: null, name: 'Mering St Afra', lonlat: [10.9714372, 48.2740395] };
 
 export async function findStation() {
   const r = await j(`${BASE}/locations?query=${encodeURIComponent('Mering St Afra')}&results=5&v=3`, { cache: 'no-store' });

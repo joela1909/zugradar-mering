@@ -32,8 +32,13 @@ const station = async (env, pattern) => parseStations(await db(env, '/station/' 
 const plan = async (env, eva, date) => parseTimetable(await db(env, `/plan/${eva}/${planPath(date)}`, 300));
 const changes = async (env, eva) => parseTimetable(await db(env, `/fchg/${eva}`, 30));
 
+// Feste Kartenposition für Mering-St Afra (nur Darstellung, Fahrplan- und GPS-Daten bleiben unverändert)
+const OVERRIDES = [[/^Mering[- ]St\.? ?Afra/i, { latitude: 48.2740395, longitude: 10.9714372 }]];
+
 // Koordinaten per Ortssuche (Photon/OSM), 30 Tage gemerkt
 async function locate(name) {
+  const fixed = OVERRIDES.find(([re]) => re.test(name));
+  if (fixed) return fixed[1];
   const text = await cached('geo:' + name, 2592000, async () => {
     for (const q of [`${name} Bahnhof`, name]) {
       const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=1&lang=de&lat=${BIAS.lat}&lon=${BIAS.lon}`, { headers: { 'user-agent': UA } });
