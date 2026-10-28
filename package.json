@@ -10,7 +10,8 @@
     "test": "node --test src/predict.test.js src/progress.test.js iris.test.js"
   },
   "dependencies": {
-    "maplibre-gl": "^5.6.0"
+    "maplibre-gl": "^5.6.0",
+    "three": "^0.186.1"
   },
   "devDependencies": {
     "db-stations": "^5.0.2",

@@ -5,6 +5,7 @@ import * as api from './api.js';
 import { prepare, positionAt } from './train.js';
 import { expectedDelay, record, histKey } from './predict.js';
 import { dist } from './geo.js';
+import { createTrainLayer } from './train3d.js';
 import { dirOf, matchesDir, startName, timeProgress, distProgress, minutesUntil, buffer, stopFractions } from './progress.js';
 
 const HOME_ADDRESS = 'Koloniestraße 26, 86399 Bobingen';
@@ -32,6 +33,7 @@ const mapReady = new Promise(r => {
   map.on('error', e => { if (!done && !map.isStyleLoaded()) { console.warn('Kartenstil nicht ladbar', e.error); map.setStyle(BLANK); map.once('styledata', go); } });
 });
 
+const train3d = createTrainLayer(maplibregl);
 const emptyFC = { type: 'FeatureCollection', features: [] };
 const lineFeat = (c, p = {}) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: c }, properties: p });
 // 3D-Gebäude (OpenMapTiles-Schema) + weiches Licht, wie in Apple Karten
@@ -63,6 +65,7 @@ async function ensureLayers() {
   map.addLayer({ id: 'rail-case', type: 'line', source: 'rail', paint: { 'line-color': '#fff', 'line-width': 6 } });
   map.addLayer({ id: 'rail', type: 'line', source: 'rail', paint: { 'line-color': ['get', 'color'], 'line-width': 3.4 } });
   map.addLayer({ id: 'rail-ties', type: 'line', source: 'rail', paint: { 'line-color': '#fff', 'line-width': 1.4, 'line-dasharray': [1, 3] } });
+  map.addLayer(train3d.layer);
 }
 const shortName = n => n.replace(/\s*\(b [^)]*\)/, '').replace(/^Augsburg[ -](?!Hbf)/, '').replace(/^München[ -](?!Hbf)/, '');
 const el = (cn, html) => { const e = document.createElement('div'); e.className = cn; e.innerHTML = html; return e; };
@@ -329,6 +332,15 @@ const TRAIN_SVG = `<svg viewBox="0 0 28 84" width="28" height="84" aria-hidden="
 <rect x="4" y="2" width="4" height="80" rx="2" fill="#ec0016"/><rect x="20" y="2" width="4" height="80" rx="2" fill="#ec0016"/>
 <path d="M9 10c0-3 2.2-5 5-5s5 2 5 5v5H9z" fill="#2c2c2e"/><rect x="10" y="20" width="8" height="5" rx="2" fill="#e5e5ea"/><rect x="10" y="38" width="8" height="5" rx="2" fill="#e5e5ea"/><rect x="10" y="62" width="8" height="5" rx="2" fill="#e5e5ea"/></g></svg>`;
 
+// 3D-Zug ab Zoom 13,2 (im 3D-Modus), davor das flache Symbol
+function syncTrainLook() {
+  const show = S.d3 && map.getZoom() >= 13.2;
+  train3d.state.visible = show;
+  if (S.trainMarker) S.trainMarker.getElement().style.visibility = show ? 'hidden' : 'visible';
+  map.triggerRepaint();
+}
+map.on('zoom', syncTrainLook);
+
 function tick() {
   if (!S.tr) { S.trainMarker?.remove(); S.trainMarker = null; S.trainLabel?.remove(); S.trainLabel = null; S.trainPos = null; return; }
   const now = new Date(), p = positionAt(S.tr, now);
@@ -338,6 +350,7 @@ function tick() {
   const d = S.tr.dep.delay ?? 0, html = `${S.tr.dep.line}${d >= 1 ? ` <b>+${Math.round(d)}</b>` : ''}`;
   if (!S.trainMarker) S.trainMarker = new maplibregl.Marker({ element: el('trainmodel', TRAIN_SVG), anchor: 'center', rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat(pos).addTo(map);
   S.trainMarker.setLngLat(pos).setRotation(p.bearing || 0);
+  train3d.state.lonlat = pos; train3d.state.bearing = p.bearing || 0; syncTrainLook();
   if (!S.trainLabel) { S.trainLabel = mk(el('lbl train-l', html), pos); labels.push({ marker: S.trainLabel, ll: pos, prio: 0, essential: true, trainLabel: true }); }
   const it = labels.find(l => l.trainLabel); if (it) it.ll = pos;
   S.trainLabel.setLngLat(pos); S.trainLabel.getElement().innerHTML = html;
@@ -352,7 +365,7 @@ function logObservation() {
 }
 
 const setD3 = () => { $('d3').classList.toggle('on', S.d3); $('d3').textContent = S.d3 ? '3D' : '2D'; };
-$('d3').onclick = () => { S.d3 = !S.d3; store.set('zr.3d', S.d3); setD3(); map.easeTo({ pitch: S.d3 ? 55 : 0, bearing: S.d3 ? map.getBearing() : 0, duration: 700 }); setTimeout(layout, 750); };
+$('d3').onclick = () => { S.d3 = !S.d3; store.set('zr.3d', S.d3); setD3(); syncTrainLook(); map.easeTo({ pitch: S.d3 ? 55 : 0, bearing: S.d3 ? map.getBearing() : 0, duration: 700 }); setTimeout(layout, 750); };
 setD3();
 $('refresh').onclick = refresh;
 $('fit').onclick = fitAll;
@@ -365,5 +378,6 @@ $('fit').onclick = fitAll;
   render(); fitAll();
 })();
 if (S.track) navigator.permissions?.query({ name: 'geolocation' }).then(r => { if (r.state === 'granted') startTracking(); }).catch(() => {});
+if (location.hash === '#debug') Object.assign(window, { __map: map, __S: S, __t3d: train3d });
 setInterval(tick, 1000);
 setInterval(() => { refresh().then(logObservation); }, 30000);
