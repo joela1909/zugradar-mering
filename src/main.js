@@ -92,7 +92,7 @@ function lineRects(coords) {
 }
 function layout() {
   const points = [...dots, S.station.lonlat, ...(S.me ? [S.me] : [])].map(ll => { const p = map.project(ll); return rect(p.x, p.y, 14, 14); });
-  if (S.trainPos) { const p = map.project(S.trainPos); points.push(rect(p.x, p.y, 34, 34)); }
+  if (S.trainPos) { const p = map.project(S.trainPos); points.push(rect(p.x, p.y, 60, 60)); }
   const rail = lineRects(S.tr?.polyline), walk = lineRects(S.walk?.coords);
   const placed = [...points];
   const items = labels.filter(l => l.marker.getElement().isConnected).sort((a, b) => a.prio - b.prio);
@@ -332,11 +332,10 @@ const TRAIN_SVG = `<svg viewBox="0 0 28 84" width="28" height="84" aria-hidden="
 <rect x="4" y="2" width="4" height="80" rx="2" fill="#ec0016"/><rect x="20" y="2" width="4" height="80" rx="2" fill="#ec0016"/>
 <path d="M9 10c0-3 2.2-5 5-5s5 2 5 5v5H9z" fill="#2c2c2e"/><rect x="10" y="20" width="8" height="5" rx="2" fill="#e5e5ea"/><rect x="10" y="38" width="8" height="5" rx="2" fill="#e5e5ea"/><rect x="10" y="62" width="8" height="5" rx="2" fill="#e5e5ea"/></g></svg>`;
 
-// 3D-Zug ab Zoom 13,2 (im 3D-Modus), davor das flache Symbol
+// Das 3D-Modell ist immer sichtbar (größenangepasst), das flache Symbol bleibt verborgen
 function syncTrainLook() {
-  const show = S.d3 && map.getZoom() >= 13.2;
-  train3d.state.visible = show;
-  if (S.trainMarker) S.trainMarker.getElement().style.visibility = show ? 'hidden' : 'visible';
+  train3d.state.visible = true;
+  if (S.trainMarker) S.trainMarker.getElement().style.visibility = 'hidden';
   map.triggerRepaint();
 }
 map.on('zoom', syncTrainLook);

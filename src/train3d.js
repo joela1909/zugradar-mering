@@ -34,10 +34,12 @@ export function buildTrain() {
 
 /** Benutzerdefinierte MapLibre-Ebene: ein 3D-Zug an einer Position, in Fahrtrichtung gedreht. */
 export function createTrainLayer(maplibregl) {
-  const state = { lonlat: null, bearing: 0, visible: true, scale: 3 };
+  const TRAIN_LENGTH = 74, TRAIN_WIDTH = 2.9, TARGET_PX = 64, TARGET_WIDTH_PX = 15; // Modelllänge in m, gewünschte Mindestlänge auf dem Bildschirm
+  const state = { lonlat: null, bearing: 0, visible: true };
   const layer = {
     id: 'train3d', type: 'custom', renderingMode: '3d',
     onAdd(map, gl) {
+      this.map = map;
       this.camera = new THREE.Camera(); this.scene = new THREE.Scene();
       this.scene.add(new THREE.AmbientLight(0xffffff, 2.1));
       const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(-.4, -.7, 1).normalize(); this.scene.add(sun);
@@ -47,8 +49,11 @@ export function createTrainLayer(maplibregl) {
     },
     render(gl, args) {
       if (!state.lonlat || !state.visible) return;
-      const mc = maplibregl.MercatorCoordinate.fromLngLat(state.lonlat, 0), s = mc.meterInMercatorCoordinateUnits() * state.scale;
-      const model = new THREE.Matrix4().makeTranslation(mc.x, mc.y, mc.z).scale(new THREE.Vector3(s, -s, s)).multiply(new THREE.Matrix4().makeRotationZ(-state.bearing * Math.PI / 180));
+      const mc = maplibregl.MercatorCoordinate.fromLngLat(state.lonlat, 0);
+      // Größe an den Zoom anpassen: mindestens TARGET_PX lang, bei starkem Zoom echte Größe
+      const mpp = 40075016.686 * Math.cos(state.lonlat[1] * Math.PI / 180) / (512 * 2 ** this.map.getZoom());
+      const unit = mc.meterInMercatorCoordinateUnits(), sl = unit * Math.max(1, TARGET_PX * mpp / TRAIN_LENGTH), sw = unit * Math.max(1, TARGET_WIDTH_PX * mpp / TRAIN_WIDTH);
+      const model = new THREE.Matrix4().makeTranslation(mc.x, mc.y, mc.z).scale(new THREE.Vector3(sw, -sl, sw)).multiply(new THREE.Matrix4().makeRotationZ(-state.bearing * Math.PI / 180));
       this.camera.projectionMatrix = new THREE.Matrix4().fromArray(args.defaultProjectionData?.mainMatrix ?? args.modelViewProjectionMatrix).multiply(model);
       this.renderer.resetState();
       this.renderer.render(this.scene, this.camera);
