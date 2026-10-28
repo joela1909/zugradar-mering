@@ -31,8 +31,9 @@ export default {
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(req);
     const path = url.pathname.slice(4);
     const errors = [];
+    globalThis.__lastFail = '';
     for (const [name, fn] of [['vendo', () => viaVendo(path, url.searchParams)], ['transport.rest', () => viaTransportRest(path, url.search)]]) {
-      try { return await fn(); } catch (e) { console.error(name, e?.stack); errors.push(`${name}: ${String(e?.message || e).slice(0, 100)}`); }
+      try { return await fn(); } catch (e) { console.error(name, e?.stack); errors.push(`${name}: ${[e?.message, globalThis.__lastFail, e?.response?.status && 'status ' + e.response.status].filter(Boolean).join(' / ').slice(0, 220) || 'unbekannt'}`); }
     }
     return json({ error: 'Alle Quellen fehlgeschlagen', detail: errors.join(' | ') }, 502);
   },

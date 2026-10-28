@@ -7506,10 +7506,10 @@ var init_db_hafas_stations = __esm({
   }
 });
 
-// .wrangler/tmp/bundle-8slsP0/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-Bib1kR/middleware-loader.entry.ts
 init_modules_watch_stub();
 
-// .wrangler/tmp/bundle-8slsP0/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-Bib1kR/middleware-insertion-facade.js
 init_modules_watch_stub();
 
 // worker.js
@@ -7528,12 +7528,25 @@ var import_qs = __toESM(require_lib(), 1);
 import tls from "tls";
 import https from "https";
 
-// ../../../root/.npm/_npx/32026684e21afda6/node_modules/unenv/dist/runtime/npm/cross-fetch.mjs
+// cf-fetch.js
 init_modules_watch_stub();
-var fetch2 = /* @__PURE__ */ __name((...args) => globalThis.fetch(...args), "fetch");
-var Headers = globalThis.Headers;
 var Request = globalThis.Request;
+var Headers = globalThis.Headers;
 var Response2 = globalThis.Response;
+async function fetch2(url, opts = {}) {
+  const { agent, keepalive, query, ...rest } = opts;
+  const res = await globalThis.fetch(url, rest);
+  if (!res.ok) {
+    let body = "";
+    try {
+      body = (await res.clone().text()).slice(0, 120);
+    } catch {
+    }
+    globalThis.__lastFail = `HTTP ${res.status} ${new URL(url).pathname} ${body}`.trim();
+  }
+  return res;
+}
+__name(fetch2, "fetch");
 
 // node_modules/db-vendo-client/lib/request.js
 var import_content_type = __toESM(require_content_type(), 1);
@@ -17053,12 +17066,13 @@ var worker_default = {
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(req);
     const path = url.pathname.slice(4);
     const errors = [];
+    globalThis.__lastFail = "";
     for (const [name, fn] of [["vendo", () => viaVendo(path, url.searchParams)], ["transport.rest", () => viaTransportRest(path, url.search)]]) {
       try {
         return await fn();
       } catch (e) {
         console.error(name, e?.stack);
-        errors.push(`${name}: ${String(e?.message || e).slice(0, 100)}`);
+        errors.push(`${name}: ${[e?.message, globalThis.__lastFail, e?.response?.status && "status " + e.response.status].filter(Boolean).join(" / ").slice(0, 220) || "unbekannt"}`);
       }
     }
     return json({ error: "Alle Quellen fehlgeschlagen", detail: errors.join(" | ") }, 502);
@@ -17114,7 +17128,7 @@ var jsonError = /* @__PURE__ */ __name(async (request2, env, _ctx, middlewareCtx
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
 
-// .wrangler/tmp/bundle-8slsP0/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-Bib1kR/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
@@ -17147,7 +17161,7 @@ function __facade_invoke__(request2, env, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-8slsP0/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-Bib1kR/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;
