@@ -54,28 +54,49 @@ let labels = [], dots = [];
 const reg = (marker, ll, prio, o = {}) => { labels.push({ marker, ll, prio, ...o }); return marker; };
 const rect = (cx, cy, w, h) => ({ x1: cx - w / 2, y1: cy - h / 2, x2: cx + w / 2, y2: cy + h / 2 });
 const hit = (a, b) => !(a.x2 <= b.x1 || a.x1 >= b.x2 || a.y2 <= b.y1 || a.y1 >= b.y2);
+// Linien als kleine Rechtecke in Bildschirmkoordinaten (Hindernisse für Labels)
+function lineRects(coords) {
+  const out = [], W = innerWidth, H = innerHeight, inside = p => p.x > -60 && p.x < W + 60 && p.y > -60 && p.y < H + 60;
+  let prev = null;
+  for (const c of coords || []) {
+    const p = map.project(c);
+    if (prev) {
+      const d = Math.hypot(p.x - prev.x, p.y - prev.y), n = Math.min(400, Math.max(1, Math.ceil(d / 12)));
+      if (inside(p) || inside(prev)) for (let k = 1; k <= n; k++) { const q = { x: prev.x + (p.x - prev.x) * k / n, y: prev.y + (p.y - prev.y) * k / n }; if (inside(q)) out.push(rect(q.x, q.y, 10, 10)); }
+    }
+    prev = p;
+  }
+  return out;
+}
 function layout() {
-  const placed = [...dots, ...(S.me ? [S.me] : [])].map(ll => { const p = map.project(ll); return rect(p.x, p.y, 14, 14); });
-  if (S.trainPos) { const p = map.project(S.trainPos); placed.push(rect(p.x, p.y, 34, 34)); }
+  const points = [...dots, S.station.lonlat, ...(S.me ? [S.me] : [])].map(ll => { const p = map.project(ll); return rect(p.x, p.y, 14, 14); });
+  if (S.trainPos) { const p = map.project(S.trainPos); points.push(rect(p.x, p.y, 34, 34)); }
+  const rail = lineRects(S.tr?.polyline), walk = lineRects(S.walk?.coords);
+  const placed = [...points];
   const items = labels.filter(l => l.marker.getElement().isConnected).sort((a, b) => a.prio - b.prio);
   for (const it of items) {
     const el = it.marker.getElement(); el.style.display = '';
-    const { x, y } = map.project(it.ll), w = el.offsetWidth + 8, h = el.offsetHeight + 8, gx = w / 2 + 8, gy = h / 2 + 8;
-    const cands = it.fixed ? [[0, 0]] : [[0, -gy], [0, gy], [gx, 0], [-gx, 0], [gx * .8, -gy], [-gx * .8, -gy], [gx * .8, gy], [-gx * .8, gy], [0, -gy * 1.9], [0, gy * 1.9]];
-    let pick = cands.find(o => !placed.some(r => hit(r, rect(x + o[0], y + o[1], w, h))));
+    const { x, y } = map.project(it.ll), w = el.offsetWidth + 8, h = el.offsetHeight + 8, gx = w / 2 + 6, gy = h / 2 + 6;
+    const dirs = [[0, -1], [0, 1], [1, 0], [-1, 0], [.8, -.8], [-.8, -.8], [.8, .8], [-.8, .8]];
+    const cands = it.fixed ? [[0, 0]] : [1, 1.6, 2.4].flatMap(k => dirs.map(([a, b]) => [a * gx * k, b * gy * k]));
+    const free = (o, obstacles) => !obstacles.some(r => hit(r, rect(x + o[0], y + o[1], w, h)));
+    const lineObs = [...rail, ...(it.onWalk ? [] : walk)];
+    let pick = cands.find(o => free(o, placed) && free(o, lineObs));
+    if (!pick && it.essential) pick = cands.find(o => free(o, placed));
     if (!pick) { if (!it.essential) { el.style.display = 'none'; continue; } pick = cands[0]; }
     it.marker.setOffset(pick); placed.push(rect(x + pick[0], y + pick[1], w, h));
   }
 }
 map.on('moveend', layout); map.on('zoomend', layout);
-let stationMarker, homeMarker, walkMarker;
+let stationMarker, homeMarker, walkMarker, stationDot;
 
 function placeBase() {
   labels = labels.filter(l => l.marker !== stationMarker && l.marker !== homeMarker);
-  stationMarker?.remove(); homeMarker?.remove();
+  stationMarker?.remove(); homeMarker?.remove(); stationDot?.remove();
   const st = S.tr?.stops?.find((_, i) => i === S.tr.stopIdx);
   stationMarker = reg(mk(el('pin', `🚉 ${S.station.name.replace(' (Demo)', '')}${st ? `<small>${planTimes(prediction())}</small>` : ''}`), S.station.lonlat), S.station.lonlat, 1, { essential: true });
   homeMarker = reg(mk(el('me', '🏠 Koloniestraße 26'), S.home), S.home, 1, { essential: true });
+  stationDot = mk(el('dot station', ''), S.station.lonlat);
   layout();
 }
 function planTimes(p) { return p ? (same(p.plannedDep, p.depT) ? `<b>${fmt(p.depT)}</b>` : `${fmt(p.plannedDep)} → <b style="color:#fca5a5">${fmt(p.depT)}</b>`) : ''; }
@@ -97,7 +118,7 @@ async function loadWalk() {
   walkMarker?.remove();
   const mid = S.walk.coords[Math.floor(S.walk.coords.length / 2)];
   walkMarker = mk(el('lbl route', `${MODES[S.mode][0]} ${Math.ceil(S.walk.seconds / 60)} min · ${(S.walk.meters / 1000).toFixed(1)} km`), mid);
-  walkMarker._zr = { marker: walkMarker, ll: mid, prio: 2, essential: true }; labels.push(walkMarker._zr); layout();
+  walkMarker._zr = { marker: walkMarker, ll: mid, prio: 2, essential: true, onWalk: true }; labels.push(walkMarker._zr); layout();
 }
 
 async function refresh() {
