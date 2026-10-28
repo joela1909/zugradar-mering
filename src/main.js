@@ -36,21 +36,42 @@ async function ensureLayers() {
   map.addSource('rail', { type: 'geojson', data: emptyFC });
   map.addSource('walk', { type: 'geojson', data: emptyFC });
   map.addLayer({ id: 'walk-case', type: 'line', source: 'walk', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#fff', 'line-width': 9 } });
-  map.addLayer({ id: 'walk', type: 'line', source: 'walk', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#2563eb', 'line-width': 5 } });
+  map.addLayer({ id: 'walk', type: 'line', source: 'walk', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#0066cc', 'line-width': 5 } });
   map.addLayer({ id: 'rail-glow', type: 'line', source: 'rail', paint: { 'line-color': ['get', 'color'], 'line-width': 12, 'line-opacity': .2, 'line-blur': 6 } });
   map.addLayer({ id: 'rail-case', type: 'line', source: 'rail', paint: { 'line-color': '#fff', 'line-width': 6 } });
   map.addLayer({ id: 'rail', type: 'line', source: 'rail', paint: { 'line-color': ['get', 'color'], 'line-width': 3.4 } });
   map.addLayer({ id: 'rail-ties', type: 'line', source: 'rail', paint: { 'line-color': '#fff', 'line-width': 1.4, 'line-dasharray': [1, 3] } });
 }
 const el = (cn, html) => { const e = document.createElement('div'); e.className = cn; e.innerHTML = html; return e; };
-const mk = (element, ll, anchor = 'center') => new maplibregl.Marker({ element, anchor }).setLngLat(ll).addTo(map);
+const mk = (element, ll) => new maplibregl.Marker({ element, anchor: 'center' }).setLngLat(ll).addTo(map);
+
+// ---- Label-Layout: keine Überlappungen ----
+let labels = [], dots = [];
+const reg = (marker, ll, prio, o = {}) => { labels.push({ marker, ll, prio, ...o }); return marker; };
+const rect = (cx, cy, w, h) => ({ x1: cx - w / 2, y1: cy - h / 2, x2: cx + w / 2, y2: cy + h / 2 });
+const hit = (a, b) => !(a.x2 <= b.x1 || a.x1 >= b.x2 || a.y2 <= b.y1 || a.y1 >= b.y2);
+function layout() {
+  const placed = dots.map(ll => { const p = map.project(ll); return rect(p.x, p.y, 14, 14); });
+  const items = labels.filter(l => l.marker.getElement().isConnected).sort((a, b) => a.prio - b.prio);
+  for (const it of items) {
+    const el = it.marker.getElement(); el.style.display = '';
+    const { x, y } = map.project(it.ll), w = el.offsetWidth + 8, h = el.offsetHeight + 8, gx = w / 2 + 8, gy = h / 2 + 8;
+    const cands = it.fixed ? [[0, 0]] : [[0, -gy], [0, gy], [gx, 0], [-gx, 0], [gx * .8, -gy], [-gx * .8, -gy], [gx * .8, gy], [-gx * .8, gy], [0, -gy * 1.9], [0, gy * 1.9]];
+    let pick = cands.find(o => !placed.some(r => hit(r, rect(x + o[0], y + o[1], w, h))));
+    if (!pick) { if (!it.essential) { el.style.display = 'none'; continue; } pick = cands[0]; }
+    it.marker.setOffset(pick); placed.push(rect(x + pick[0], y + pick[1], w, h));
+  }
+}
+map.on('moveend', layout); map.on('zoomend', layout);
 let stationMarker, homeMarker, walkMarker;
 
 function placeBase() {
+  labels = labels.filter(l => l.marker !== stationMarker && l.marker !== homeMarker);
   stationMarker?.remove(); homeMarker?.remove();
   const st = S.tr?.stops?.find((_, i) => i === S.tr.stopIdx);
-  stationMarker = mk(el('pin', `🚉 ${S.station.name.replace(' (Demo)', '')}${st ? `<small>${planTimes(prediction())}</small>` : ''}`), S.station.lonlat, 'bottom');
-  homeMarker = mk(el('me', '🏠 Koloniestraße 26'), S.home, 'bottom');
+  stationMarker = reg(mk(el('pin', `🚉 ${S.station.name.replace(' (Demo)', '')}${st ? `<small>${planTimes(prediction())}</small>` : ''}`), S.station.lonlat), S.station.lonlat, 1, { essential: true });
+  homeMarker = reg(mk(el('me', '🏠 Koloniestraße 26'), S.home), S.home, 1, { essential: true });
+  layout();
 }
 function planTimes(p) { return p ? `${fmt(p.plannedDep)} → <b style="color:#fca5a5">${fmt(p.depT)}</b>` : ''; }
 
@@ -64,9 +85,11 @@ async function loadWalk() {
   try { S.walk = await api.route(S.mode, S.home, S.station.lonlat); }
   catch { const m = dist(S.home, S.station.lonlat) * 1.3; S.walk = { coords: [S.home, S.station.lonlat], meters: m, seconds: m / ({ foot: 1.33, bike: 4.2, car: 11 }[S.mode]) }; }
   map.getSource('walk').setData(lineFeat(S.walk.coords));
+  labels = labels.filter(l => l.marker !== walkMarker);
   walkMarker?.remove();
   const mid = S.walk.coords[Math.floor(S.walk.coords.length / 2)];
   walkMarker = mk(el('lbl route', `${MODES[S.mode][0]} ${Math.ceil(S.walk.seconds / 60)} min · ${(S.walk.meters / 1000).toFixed(1)} km`), mid);
+  walkMarker._zr = { marker: walkMarker, ll: mid, prio: 2, essential: true }; labels.push(walkMarker._zr); layout();
 }
 
 async function refresh() {
@@ -97,21 +120,21 @@ async function selectTrip(id, fit) {
   S.sel = id;
   const dep = S.deps.find(d => d.tripId === id);
   await ensureLayers();
-  S.markers.forEach(m => m.remove()); S.markers = [];
+  S.markers.forEach(m => m.remove()); S.markers = []; dots = []; labels = labels.filter(l => !l.stop);
   if (!dep) { S.tr = null; map.getSource('rail').setData(emptyFC); render(); return; }
   try {
     const t = S.live ? await api.trip(id, S.station) : await S.demo.trip(id);
     const stopIdx = t.stopovers.findIndex(s => (S.station.id && s.id === S.station.id) || /afra/i.test(s.name));
     S.tr = { ...prepare(t.stopovers, t.polyline), raw: t, dep, stopIdx };
     const worst = Math.max(0, ...t.stopovers.map(s => s.arrDelay ?? s.depDelay ?? 0));
-    const color = worst >= 5 ? '#dc2626' : worst >= 1 ? '#ea580c' : '#e30613';
+    const color = worst >= 5 ? '#ff3b30' : worst >= 1 ? '#ff9f0a' : '#34c759';
     map.getSource('rail').setData(lineFeat(t.polyline, { color }));
     t.stopovers.forEach((s, i) => {
       if (i === stopIdx || dist(s.lonlat, S.station.lonlat) < 900) return;
       const d = s.arrDelay ?? s.depDelay ?? 0, tm = s.arr || s.dep;
       const e = el('lbl', `${s.name}<br><i class="${cls(d)}">${fmt(tm)}${d >= 1 ? ' +' + Math.round(d) : ''}</i>`);
-      S.markers.push(mk(e, s.lonlat, i % 2 ? 'top' : 'bottom'));
-      S.markers.push(mk(el('dot', ''), s.lonlat));
+      S.markers.push(reg(mk(e, s.lonlat), s.lonlat, 5, { stop: true }));
+      S.markers.push(mk(el('dot', ''), s.lonlat)); dots.push(s.lonlat);
     });
   } catch (e) { console.warn(e); S.tr = null; map.getSource('rail').setData(emptyFC); }
   placeBase(); render(); tick();
@@ -160,7 +183,7 @@ function render() {
     ${dep.trainNo ? `<div><span>Zug</span><span>${dep.category || ''} ${dep.trainNo}</span></div>` : ''}
     ${dep.plannedPlatform && dep.platform !== dep.plannedPlatform ? `<div><span>Gleiswechsel</span><span class="late">Gl. ${dep.platform} statt ${dep.plannedPlatform}</span></div>` : ''}
     ${dep.origin ? `<div><span>Von → Nach</span><span>${dep.origin} → ${dep.direction}</span></div>` : ''}
-    ${dep.previousStops.length || dep.nextStops.length ? `<div><span>Verlauf</span><span style="text-align:right;max-width:68%">${[...dep.previousStops.slice(-3), '<b>Mering St Afra</b>', ...dep.nextStops].join(' › ')}</span></div>` : ''}
+    ${(dep.previousStops?.length || dep.nextStops?.length) ? `<div><span>Verlauf</span><span style="text-align:right;max-width:68%">${[...(dep.previousStops || []).slice(-3), '<b>Mering St Afra</b>', ...(dep.nextStops || [])].join(' › ')}</span></div>` : ''}
     ${S.deps.slice(i + 1, i + 3).length ? `<div><span>Danach</span><span style="text-align:right">${S.deps.slice(i + 1, i + 3).map(n => `${fmt(n.actual || n.planned)} ${n.line}${n.delay >= 1 ? ' +' + Math.round(n.delay) : ''}`).join(' · ')}</span></div>` : ''}
     <div><span>Verkehrsmittel zum Bahnhof</span><span><button id="modebtn" style="background:var(--line);padding:2px 10px">${MODES[S.mode][0]} ${MODES[S.mode][1]} ⇄</button></span></div>
     <div><span>Startpunkt</span><span>Koloniestraße 26, Bobingen</span></div>
@@ -177,8 +200,9 @@ function tick() {
   const now = new Date(), p = positionAt(S.tr, now);
   const pos = S.live && S.tr.raw.currentLocation && p.state === 'fährt' ? S.tr.raw.currentLocation : p.pos;
   const d = S.tr.dep.delay ?? 0, html = `<span>🚆</span>${S.tr.dep.line}${d >= 1 ? ` <b>+${Math.round(d)}</b>` : ''}`;
-  if (!S.trainMarker) S.trainMarker = mk(el('train', html), pos);
-  else { S.trainMarker.setLngLat(pos); S.trainMarker.getElement().innerHTML = html; }
+  if (!S.trainMarker) { S.trainMarker = mk(el('train', html), pos); S.trainMarker._zr = { marker: S.trainMarker, ll: pos, prio: 0, fixed: true, essential: true, keep: true }; labels.push(S.trainMarker._zr); }
+  else { S.trainMarker.setLngLat(pos); S.trainMarker._zr.ll = pos; S.trainMarker.getElement().innerHTML = html; }
+  layout();
 }
 
 function logObservation() {
