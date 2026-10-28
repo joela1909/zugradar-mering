@@ -1,0 +1,9 @@
+{
+  "name": "zugradar-mering",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": { "dev": "vite", "build": "vite build", "preview": "vite preview", "test": "node --test src/predict.test.js" },
+  "dependencies": { "maplibre-gl": "^5.6.0" },
+  "devDependencies": { "vite": "^7.0.0" }
+}
