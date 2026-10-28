@@ -13,6 +13,7 @@ const cls = m => (m >= 5 ? 'late' : m >= 1 ? 'minor' : 'ontime');
 const addMin = (d, m) => new Date(+d + m * 60000);
 const store = { get: (k, f) => { try { return JSON.parse(localStorage.getItem(k)) ?? f; } catch { return f; } }, set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
 
+let liveError = '';
 const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home', null), mode: store.get('zr.mode', 'foot'), walk: null, trainMarker: null };
 
 const map = new maplibregl.Map({ container: 'map', style: 'https://tiles.openfreemap.org/styles/positron', center: S.station.lonlat, zoom: 13.5, attributionControl: { compact: true } });
@@ -64,9 +65,10 @@ async function refresh() {
   try {
     try {
       if (!S.live) S.station = await api.findStation();
-      S.deps = await api.departures(S.station); S.live = true;
+      S.deps = await api.departures(S.station); S.live = true; liveError = '';
     } catch (e) {
       console.warn('Live-Daten nicht erreichbar, Demo-Modus:', e);
+      liveError = String(e?.message || e).slice(0, 160);
       S.live = false; S.demo = api.demo(); S.station = S.demo.station; S.deps = S.demo.deps;
     }
     $('mode').textContent = S.live ? 'LIVE' : 'DEMO'; $('mode').className = 'chip' + (S.live ? ' live' : '');
@@ -141,7 +143,7 @@ function renderDetail() {
     <div class="box"><small>Spätestens los</small><div class="v">${fmt(leave)}</div><div class="sub">inkl. 1 min Puffer</div></div>
   </div>
   <div class="seg">${segs}</div>
-  <div class="note">${S.live ? 'Live-Daten: DB (transport.rest). ' : 'Demo-Daten – Live-Quelle nicht erreichbar. '}Erwartung = Live-Prognose gewichtet mit gespeicherter Historie; ${p ? p.stopsAway + ' Halt(e) bis hier.' : ''}</div>`;
+  <div class="note">${S.live ? 'Live-Daten: DB (transport.rest). ' : `Demo-Daten – Live-Quelle nicht erreichbar${liveError ? ' (' + liveError + ')' : ''}. `}Erwartung = Live-Prognose gewichtet mit gespeicherter Historie; ${p ? p.stopsAway + ' Halt(e) bis hier.' : ''}</div>`;
   $('detail').querySelectorAll('[data-m]').forEach(b => b.onclick = () => { S.mode = b.dataset.m; store.set('zr.mode', S.mode); loadWalk().then(renderDetail); });
 }
 
