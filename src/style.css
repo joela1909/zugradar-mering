@@ -30,7 +30,7 @@ button:active{opacity:.55;transform:scale(.97)}
 .fabs button+button{border-top:.5px solid var(--sep)}
 .fabs svg{fill:none;stroke:currentColor;stroke-width:1.8}
 .fabs #gps.on{color:var(--blue)}.fabs #gps.on svg{fill:currentColor}
-.fabs #d3{font-weight:700;letter-spacing:-.01em;color:var(--mute)}.fabs #d3.on{color:var(--blue)}
+.fabs #d3{color:var(--mute)}.fabs #d3.on{color:var(--blue)}
 body.nav .dirctl,body.nav .status{display:none}
 
 /* Blatt unten: klein · mittel · groß */
@@ -128,3 +128,35 @@ body.nav .dirctl,body.nav .status{display:none}
 .toast{position:fixed;left:50%;top:calc(max(12px,env(safe-area-inset-top)) + 4px);z-index:8;transform:translate(-50%,-12px);opacity:0;padding:12px 18px;border-radius:18px;font-size:15px;font-weight:600;letter-spacing:-.01em;max-width:calc(100% - 32px);text-align:center;transition:opacity .3s ease,transform .3s ease}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 .fabs{transition:opacity .3s ease}body.sheetfull .fabs{opacity:0;pointer-events:none}
+
+/* Zeitleiste „Verlauf“ */
+.tlh{margin-top:14px}
+.tl{display:flex;flex-direction:column;padding:2px 4px 4px}
+.tl-r{display:grid;grid-template-columns:52px 18px 1fr auto;align-items:center;column-gap:8px;min-height:34px;font-variant-numeric:tabular-nums;position:relative}
+.tl-t{display:flex;flex-direction:column;line-height:1.1}.tl-t b{font-size:14.5px;font-weight:600}.tl-t s{font-size:11px;color:var(--mute)}
+.tl-d{position:relative;align-self:stretch}
+.tl-d::before{content:"";position:absolute;left:50%;top:0;bottom:0;width:3px;margin-left:-1.5px;background:var(--sep)}
+.tl-r:first-child .tl-d::before{top:50%}.tl-r:last-child .tl-d::before{bottom:50%}
+.tl-r.past .tl-d::before,.tl-r.next .tl-d::before{background:var(--mute)}
+.tl-r.next .tl-d::before{bottom:50%}
+.tl-d::after{content:"";position:absolute;left:50%;top:50%;width:9px;height:9px;margin:-6.5px 0 0 -6.5px;border-radius:50%;background:var(--card);border:2px solid var(--mute)}
+.tl-r.past .tl-d::after{background:var(--mute)}
+.tl-r.here .tl-d::after{width:13px;height:13px;margin:-8.5px 0 0 -8.5px;border:3px solid var(--ink)}
+.tl-n{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tl-n small{color:var(--mute);font-size:11.5px;margin-left:4px}
+.tl-r.here .tl-n{font-weight:700}
+.tl-r.past .tl-n,.tl-r.past .tl-t b{color:var(--mute)}
+.tl-r.cx .tl-n{text-decoration:line-through}
+/* ausgefallene Verbindungen */
+.brow.cx .bd,.brow.cx .bg,.brow.cx .badge{opacity:.55}.brow.cx .bd{text-decoration:line-through}
+/* Stationslabel: Rahmen nach Puffer */
+.pin{transition:box-shadow .4s ease}
+.pin[data-buf=ok]{box-shadow:0 0 0 2.5px #30d158,0 6px 20px rgba(0,0,0,.28)}
+.pin[data-buf=tight]{box-shadow:0 0 0 2.5px #ff9f0a,0 6px 20px rgba(0,0,0,.28)}
+.pin[data-buf=miss]{box-shadow:0 0 0 2.5px #ff453a,0 6px 20px rgba(0,0,0,.28)}
+/* weiche Übergänge */
+.times .big,.chip,.lbl i,.pin b{transition:color .4s ease,background-color .4s ease}
+@keyframes zr-upd{from{opacity:.35;transform:translateY(3px)}to{opacity:1;transform:none}}
+@keyframes zr-swap{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}
+#sPeek.upd .times{animation:zr-upd .45s ease}
+#sPeek.swap{animation:zr-swap .35s ease}
+@media (prefers-reduced-motion:reduce){#sPeek.upd .times,#sPeek.swap{animation:none}}

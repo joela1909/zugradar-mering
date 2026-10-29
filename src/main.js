@@ -41,10 +41,12 @@ const mapReady = new Promise(r => {
 
 // ---- Kartenfarben im Apple-Karten-Stil (hell/dunkel) ----
 const PALETTE = {
-  light: { land: '#f3f1ed', urban: '#ece8e1', water: '#b3d3ea', park: '#d4e8c3', building: '#e4dfd6', road: '#ffffff', casing: '#dbd6cd', motor: '#fbe3a6', motorCasing: '#e2b95f', rail: '#cfc9bf', boundary: '#cfc9bf', text: '#3a3a3c', halo: 'rgba(255,255,255,.85)', b3d: ['#ebe7df', '#e0dbd2', '#d3cec5'], railCase: '#ffffff' },
-  dark: { land: '#242426', urban: '#2a2a2c', water: '#1f3b54', park: '#223a2b', building: '#323235', road: '#434347', casing: '#1b1b1d', motor: '#6e5b32', motorCasing: '#3c3220', rail: '#4b4b4f', boundary: '#4b4b4f', text: '#d6d6db', halo: 'rgba(28,28,30,.85)', b3d: ['#3a3a3e', '#323236', '#2a2a2e'], railCase: '#1c1c1e' },
+  light: { land: '#f3f1ed', urban: '#ece8e1', water: '#b3d3ea', park: '#d4e8c3', building: '#e4dfd6', road: '#ffffff', casing: '#dbd6cd', motor: '#fbe3a6', motorCasing: '#e2b95f', rail: '#cfc9bf', boundary: '#cfc9bf', text: '#3a3a3c', textSoft: '#8a8a8e', halo: 'rgba(255,255,255,.85)', b3d: ['#ebe7df', '#e0dbd2', '#d3cec5'], railCase: '#ffffff' },
+  dark: { land: '#242426', urban: '#2a2a2c', water: '#1f3b54', park: '#223a2b', building: '#323235', road: '#434347', casing: '#1b1b1d', motor: '#6e5b32', motorCasing: '#3c3220', rail: '#4b4b4f', boundary: '#4b4b4f', text: '#d6d6db', textSoft: '#8e8e93', halo: 'rgba(28,28,30,.85)', b3d: ['#3a3a3e', '#323236', '#2a2a2e'], railCase: '#1c1c1e' },
 };
 const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+// Grundkarten-Beschriftung zurücknehmen: kleine Orte, Nummern und Gewässer erst beim Hineinzoomen (eigene Labels stehen im Vordergrund)
+const LABEL_MINZOOM = { label_other: 14, label_village: 12.5, label_town: 10.5, 'highway-shield-non-us': 13, airport: 12, waterway_line_label: 14, water_name_point_label: 12, water_name_line_label: 13 };
 function applyTheme() {
   const P = PALETTE[darkQuery.matches ? 'dark' : 'light'], set = (id, prop, v) => { try { map.setPaintProperty(id, prop, v); } catch {} };
   let layers = []; try { layers = map.getStyle().layers; } catch { return; }
@@ -64,15 +66,27 @@ function applyTheme() {
       else if (/highway|road|street|primary|secondary|tertiary|minor|service|path|track|bridge|tunnel/.test(id)) set(id, 'line-color', P.road);
       else if (/rail|transit/.test(id)) set(id, 'line-color', P.rail);
       else if (/boundary|admin/.test(id)) set(id, 'line-color', P.boundary);
-    } else if (t === 'symbol') { set(id, 'text-color', P.text); set(id, 'text-halo-color', P.halo); set(id, 'text-halo-width', 1.3); }
+    } else if (t === 'symbol') {
+      set(id, 'text-color', /^label_(city|state|country)/.test(id) ? P.text : P.textSoft); set(id, 'text-halo-color', P.halo); set(id, 'text-halo-width', 1.3);
+      if (LABEL_MINZOOM[id]) try { map.setLayerZoomRange(id, LABEL_MINZOOM[id], l.maxzoom ?? 24); } catch {}
+    }
   }
-  set('walk-case', 'line-color', P.railCase); set('rail-case', 'line-color', P.railCase);
+  set('walk-case', 'line-color', P.railCase); set('rail-case', 'line-color', P.railCase); railF = -1; setRailProgress(S.railF);
   set('buildings-3d', 'fill-extrusion-color', ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 6], 0, P.b3d[0], 30, P.b3d[1], 80, P.b3d[2]]);
 }
 darkQuery.addEventListener?.('change', applyTheme);
 
 const train3d = createTrainLayer(maplibregl);
 const emptyFC = { type: 'FeatureCollection', features: [] };
+// Gefahrener Teil der Strecke grau, der Rest in der Verspätungsfarbe (Verlauf entlang der Linie, wie in Navi-Apps)
+let railF = -1, railCol = null;
+function setRailProgress(f) {
+  if (f == null || !S.railColor || !map.getLayer?.('rail')) return;
+  f = Math.min(.9999, Math.max(.0001, f));
+  if (Math.abs(f - railF) < 0.0005 && railCol === S.railColor) return;
+  railF = f; railCol = S.railColor;
+  try { map.setPaintProperty('rail', 'line-gradient', ['step', ['line-progress'], darkQuery.matches ? '#636366' : '#aeaeb2', f, S.railColor]); } catch {}
+}
 const lineFeat = (c, p = {}) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: c }, properties: p });
 // 3D-Gebäude (OpenMapTiles-Schema) + weiches Licht, wie in Apple Karten
 function add3D() {
@@ -104,14 +118,16 @@ async function ensureLayers() {
   await mapReady;
   if (map.getSource('rail')) return;
   add3D();
-  map.addSource('rail', { type: 'geojson', data: emptyFC });
+  map.addSource('rail', { type: 'geojson', data: emptyFC, lineMetrics: true });
   map.addSource('walk', { type: 'geojson', data: emptyFC });
   map.addLayer({ id: 'walk-case', type: 'line', source: 'walk', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#fff', 'line-width': 9 } });
   map.addLayer({ id: 'walk', type: 'line', source: 'walk', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['coalesce', ['get', 'color'], '#0066cc'], 'line-width': 5 } });
-  map.addLayer({ id: 'rail-glow', type: 'line', source: 'rail', paint: { 'line-color': ['get', 'color'], 'line-width': 12, 'line-opacity': .2, 'line-blur': 6 } });
-  map.addLayer({ id: 'rail-case', type: 'line', source: 'rail', paint: { 'line-color': '#fff', 'line-width': 6 } });
-  map.addLayer({ id: 'rail', type: 'line', source: 'rail', paint: { 'line-color': ['get', 'color'], 'line-width': 3.4 } });
-  map.addLayer({ id: 'rail-ties', type: 'line', source: 'rail', paint: { 'line-color': '#fff', 'line-width': 1.4, 'line-dasharray': [1, 3] } });
+  const zw = (a, b, c) => ['interpolate', ['linear'], ['zoom'], 9, a, 13, b, 16, c];
+  const lineLayout = { 'line-cap': 'round', 'line-join': 'round' };
+  map.addLayer({ id: 'rail-glow', type: 'line', source: 'rail', layout: lineLayout, paint: { 'line-color': ['get', 'color'], 'line-width': zw(10, 16, 22), 'line-opacity': .18, 'line-blur': 6 } });
+  map.addLayer({ id: 'rail-case', type: 'line', source: 'rail', layout: lineLayout, paint: { 'line-color': '#fff', 'line-width': zw(6, 9, 12) } });
+  map.addLayer({ id: 'rail', type: 'line', source: 'rail', layout: lineLayout, paint: { 'line-color': ['get', 'color'], 'line-width': zw(3.6, 5.4, 7.5) } });
+  map.addLayer({ id: 'rail-ties', type: 'line', source: 'rail', paint: { 'line-color': '#fff', 'line-width': zw(1, 1.6, 2.2), 'line-opacity': .85, 'line-dasharray': [1, 3] } });
   map.addLayer(train3d.layer);
   applyTheme();
 }
@@ -205,6 +221,13 @@ function placeBase() {
   stationDot = mk(el('dot station', ''), S.station.lonlat);
   stationMarker.getElement().style.zIndex = 4; homeMarker.getElement().style.zIndex = 3;
   layout();
+}
+// Rahmen am Stationslabel: schaffst du den Zug, wenn du jetzt losfährst bzw. mit der aktuellen Ankunftszeit?
+function markStationBuffer() {
+  const e = stationMarker?.getElement(), p = S.tr && prediction(); if (!e) return;
+  const eta = S.walk ? new Date(Date.now() + remainS() * 1000) : null, b = p && eta ? buffer(p.depT, eta) : null;
+  const v = b == null ? '' : b < 0 ? 'miss' : b < 3 ? 'tight' : 'ok';
+  if (e.dataset.buf !== v) { e.dataset.buf = v; e.title = b == null ? '' : b < 0 ? `${-b} min zu spät` : `${b} min Puffer`; }
 }
 function planTimes(p) { return p ? (same(p.plannedDep, p.depT) ? `<b>${fmt(p.depT)}</b>` : `${fmt(p.plannedDep)} → <b style="color:#fca5a5">${fmt(p.depT)}</b>`) : ''; }
 
@@ -439,9 +462,11 @@ function render() {
       <div class="sub">${leave ? `Spätestens los <b>${fmt(leave)}</b> · ${MODES[S.mode][0]} ${walkMin} min` : 'Weg wird berechnet …'}</div>`;
     half.innerHTML = `<div id="prog"></div>${S.walk ? `<button class="navbtn" id="navstart">${MODES[S.mode][0]} Route starten</button>` : ''}`;
   }
-  full.innerHTML = S.nav ? renderDetails(dep, p) : renderList(list) + renderDetails(dep, p);
+  full.innerHTML = S.nav ? renderDetails(dep, p) : renderList(list) + renderTimeline(dep) + renderDetails(dep, p);
   const on = (id, f) => { const b = $(id); if (b) b.onclick = e => { e.stopPropagation(); f(); }; };
   on('navstart', startNav); on('navend', stopNav); on('recenter', () => { S.follow = true; render(); updateNav(); });
+  const sig = [dep.tripId, fmt(depShown), dMin, S.nav].join('|'), prevSig = render.sig; render.sig = sig;
+  if (prevSig && prevSig !== sig) { const swap = prevSig.split('|')[0] !== dep.tripId; peek.classList.remove('upd', 'swap'); void peek.offsetWidth; peek.classList.add(swap ? 'swap' : 'upd'); }
   full.querySelectorAll('.brow').forEach(b => b.onclick = () => { setSheet('half'); selectTrip(b.dataset.id, true); });
   bindDetails();
   fillProg();
@@ -451,14 +476,30 @@ function render() {
 function renderList(list) {
   const rows = list.slice(0, 12).map(d => {
     const m = d.delay ?? 0, t = d.actual || d.planned;
-    return `<button class="brow ${d.tripId === S.sel ? 'sel' : ''}" data-id="${d.tripId}">
-      <span class="bt"><b class="${d.cancelled ? 'late' : cls(m)}">${d.cancelled ? '—' : fmt(t)}</b>${m >= 1 && !d.cancelled ? `<s>${fmt(d.planned)}</s>` : ''}</span>
-      <span class="badge sm" data-livery="${livery(d)}">${d.line}</span><span class="bd">${d.cancelled ? 'fällt aus · ' : ''}${d.direction}</span><span class="bg">Gl. ${d.platform}</span>
-      ${m >= 1 && !d.cancelled ? `<span class="chip ${cls(m)}">+${Math.round(m)}</span>` : '<span class="chip ontime">•</span>'}</button>`;
+    return `<button class="brow ${d.tripId === S.sel ? 'sel' : ''}${d.cancelled ? ' cx' : ''}" data-id="${d.tripId}">
+      <span class="bt"><b class="${d.cancelled ? 'late' : cls(m)}">${d.cancelled ? `<s>${fmt(d.planned)}</s>` : fmt(t)}</b>${m >= 1 && !d.cancelled ? `<s>${fmt(d.planned)}</s>` : ''}</span>
+      <span class="badge sm" data-livery="${livery(d)}">${d.line}</span><span class="bd">${d.direction}</span><span class="bg">Gl. ${d.platform}</span>
+      <span class="chip ${d.cancelled ? 'late' : cls(m)}">${d.cancelled ? 'Ausfall' : m >= 1 ? '+' + Math.round(m) : '±0'}</span></button>`;
   }).join('');
   return `<div class="bh"><b>Nächste Verbindungen</b><span class="sub">Richtung ${DIRS[S.dir]}</span></div><div class="blist">${rows || '<div class="sub" style="padding:8px 4px">Keine weiteren Verbindungen.</div>'}</div>`;
 }
 
+// Fahrtverlauf als senkrechte Zeitleiste: Halt, Plan- und Ist-Zeit; vergangene Halte blass, eigener Bahnhof hervorgehoben
+function renderTimeline(dep) {
+  const st = S.tr?.dep?.tripId === dep?.tripId ? S.tr.raw.stopovers : null;
+  if (!st?.length) return '';
+  const now = Date.now(), here = S.tr.stopIdx;
+  const rows = st.map((s, i) => {
+    const t = i === 0 ? s.dep || s.arr : s.arr || s.dep, plan = i === 0 ? s.plannedDep || s.plannedArr : s.plannedArr || s.plannedDep;
+    const d = (i === 0 ? s.depDelay ?? s.arrDelay : s.arrDelay ?? s.depDelay) ?? 0;
+    const past = +(s.dep || s.arr) < now, next = !past && (i === 0 || +(st[i - 1].dep || st[i - 1].arr) < now);
+    return `<div class="tl-r${past ? ' past' : ''}${i === here ? ' here' : ''}${next ? ' next' : ''}${s.cancelled ? ' cx' : ''}">
+      <span class="tl-t"><b class="${s.cancelled ? 'late' : cls(d)}">${fmt(t)}</b>${d >= 1 && plan ? `<s>${fmt(plan)}</s>` : ''}</span>
+      <span class="tl-d"></span><span class="tl-n">${s.name}${i === here ? ' <small>dein Bahnhof</small>' : ''}${s.cancelled ? ' <small class="late">Halt fällt aus</small>' : ''}</span>
+      ${d >= 1 ? `<span class="chip ${cls(d)}">+${Math.round(d)}</span>` : ''}</div>`;
+  }).join('');
+  return `<div class="bh tlh"><b>Verlauf</b><span class="sub">${dep.line} · ${dep.direction}</span></div><div class="tl">${rows}</div>`;
+}
 function renderDetails(dep, p) {
   const kv = (k, v) => `<div><span>${k}</span><span>${v}</span></div>`;
   const rows = [
@@ -466,7 +507,6 @@ function renderDetails(dep, p) {
     p && kv('Prognose', p.e.basis),
     dep?.trainNo && kv('Zug', `${dep.category || ''} ${dep.trainNo}`),
     dep?.plannedPlatform && dep.platform !== dep.plannedPlatform && kv('Gleiswechsel', `<span class="late">Gl. ${dep.platform} statt ${dep.plannedPlatform}</span>`),
-    dep && (dep.previousStops?.length || dep.nextStops?.length) && kv('Verlauf', [...(dep.previousStops || []).slice(-2), `<b>${stName()}</b>`, ...(dep.nextStops || []).slice(0, 3)].join(' › ')),
     !S.nav && kv('Weg zum Bahnhof', `<button id="modebtn" class="pillbtn">${MODES[S.mode][0]} ${MODES[S.mode][1]}</button>`),
     !S.nav && kv('Richtungsfilter', `<span class="kvcol"><button id="strictbtn" class="pillbtn">${S.strict ? 'An' : 'Aus'}</button><small>${S.strict ? 'nur Züge ' + RULE[S.dir] : 'alle Züge'}</small></span>`),
     kv('Daten', S.live ? `DB live${S.updated ? ` · ${S.updated.toLocaleTimeString('de-DE')}` : ''}` : 'Demo'),
@@ -717,6 +757,7 @@ function tick() {
   if (!S.trainLabel) { S.trainLabel = mk(el('lbl train-l', html), pos); labels.push({ marker: S.trainLabel, ll: pos, prio: 0, essential: true, trainLabel: true }); }
   const it = labels.find(l => l.trainLabel); if (it) it.ll = pos;
   S.trainLabel.setLngLat(pos); S.trainLabel.getElement().innerHTML = html; S.trainLabel.getElement().dataset.livery = lv;
+  S.railF = p.progress; setRailProgress(p.progress); markStationBuffer();
   scheduleLayout(); fillProg();
   if (S.nav && S.follow && ++navTicks % 2 === 0) updateNav();
 }
@@ -729,7 +770,11 @@ function logObservation() {
   store.set(k, true); record(p.key, p.liveDelay ?? 0);
 }
 
-const setD3 = () => { $('d3').classList.toggle('on', S.d3); $('d3').textContent = S.d3 ? '3D' : '2D'; };
+const D3_ICON = {
+  on: '<svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true"><path d="M12 3 4.5 7.2v9.6L12 21l7.5-4.2V7.2z" stroke-linejoin="round"/><path d="M4.5 7.2 12 11.4l7.5-4.2M12 11.4V21" stroke-linejoin="round"/></svg>',
+  off: '<svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true"><path d="M9 4.5 3.5 6.8v12.7L9 17.2l6 2.3 5.5-2.3V4.5L15 6.8z" stroke-linejoin="round"/><path d="M9 4.5v12.7M15 6.8v12.7"/></svg>',
+};
+const setD3 = () => { const b = $('d3'); b.classList.toggle('on', S.d3); b.innerHTML = D3_ICON[S.d3 ? 'on' : 'off']; b.title = S.d3 ? '3D-Ansicht (antippen für 2D)' : '2D-Ansicht (antippen für 3D)'; };
 $('d3').onclick = () => { S.d3 = !S.d3; store.set('zr.3d', S.d3); setD3(); syncTrainLook(); map.easeTo({ pitch: S.d3 ? 55 : 0, bearing: S.d3 ? map.getBearing() : 0, duration: 700 }); setTimeout(layout, 750); };
 setD3();
 $('refresh').onclick = refresh;
