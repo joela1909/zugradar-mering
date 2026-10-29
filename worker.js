@@ -141,26 +141,27 @@ async function departures(env, eva, q) {
 
 // Fahrtverlauf: dieselbe Fahrt an den Nachbarbahnhöfen suchen, dort Zeiten + Koordinaten holen
 // ---- Gleisgeometrie (OpenStreetMap über Overpass), je Abschnitt zwischen zwei Halten, dauerhaft zwischengespeichert ----
-const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
+// Mehrere Overpass-Server: overpass-api.de nimmt Verbindungen aus Rechenzentren teils nicht an
+const OVERPASS = ['https://overpass.private.coffee/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass-api.de/api/interpreter'];
 async function overpass(query) {
-  let last;
+  const errors = [];
   for (const u of OVERPASS) {
+    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 20000);
     try {
-      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 12000);
-      const r = await fetch(u, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': UA }, body: 'data=' + encodeURIComponent(query), signal: ctl.signal });
-      clearTimeout(t);
-      if (!r.ok) throw new Error('Overpass ' + r.status);
+      const r = await fetch(`${u}?data=${encodeURIComponent(query)}`, { headers: { 'user-agent': UA, accept: 'application/json' }, signal: ctl.signal });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       return await r.json();
-    } catch (e) { last = e; }
+    } catch (e) { errors.push(`${new URL(u).host}: ${String(e?.message || e).slice(0, 40)}`); }
+    finally { clearTimeout(t); }
   }
-  throw new ApiError('Gleisdaten nicht erreichbar: ' + String(last?.message || last).slice(0, 80));
+  throw new ApiError('Gleisdaten nicht erreichbar (' + errors.join('; ') + ')');
 }
 async function railSegment(from, to) {
   const a = byEva.get(from), b = byEva.get(to);
   if (!a || !b) throw new ApiError('Bahnhof unbekannt', 404);
   const A = [a.longitude, a.latitude], B = [b.longitude, b.latitude];
   const text = await cached(`rail1:${from}-${to}`, 2592000, async () => {
-    const data = await overpass(overpassQuery(A, B));
+    const data = await overpass(overpassQuery(A, B, 0.012));
     const path = shortestPath(buildGraph(data.elements), A, B);
     if (!path) throw new ApiError('Kein Gleisweg gefunden', 404);
     return JSON.stringify({ coords: thin(path).map(([x, y]) => [+x.toFixed(6), +y.toFixed(6)]) });
