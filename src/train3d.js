@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 const mat = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: .6, metalness: 0, side: THREE.DoubleSide, ...o });
 // red = Wagenkasten in Betreiberfarbe (DB rot / Arverio blau); wave = helle Welle; door = Türen; roof = dunkles Dach
-const M = { red: mat(0xec0016, { roughness: .45 }), wave: mat(0xdfe4ea), door: mat(0xd3d8de), dark: mat(0x16181b, { roughness: .2, metalness: .4 }), roof: mat(0x2b2d31), skirt: mat(0x232427) };
+const M = { red: mat(0xff2b3f, { roughness: .45 }), wave: mat(0xeef2f6), door: mat(0xe2e6ea), dark: mat(0x16181b, { roughness: .2, metalness: .4 }), roof: mat(0x2b2d31), skirt: mat(0x232427) };
 
 // Lokale Achsen: x = rechts, y = Fahrtrichtung (vorn), z = oben. Maße in Metern, nach Vorbild Siemens Desiro HC (BR 462, ~105 m).
 function box(w, l, h, m, x = 0, y = 0, z = 0) { const b = new THREE.Mesh(new THREE.BoxGeometry(w, l, h), m); b.position.set(x, y, z + h / 2); return b; }
@@ -60,7 +60,7 @@ function deckCar(y0, L, g) {
   bogies(y0, L, g);
 }
 // Endwagen mit runder Desiro-Nase; dir = 1 vorn (Nase vorn), −1 hinten (Nase hinten)
-function endCar(yFace, L, dir, g) {
+function endCar(yFace, L, dir, g, short = false) {
   const nose = 4.8, body = L - nose;
   const yb = dir > 0 ? yFace - nose : yFace + L;                                       // vorderes Ende des Wagenkastens
   const at = t => (dir > 0 ? yb - t * body : yb - (1 - t) * body);                     // t = 0 an der Nase
@@ -68,9 +68,10 @@ function endCar(yFace, L, dir, g) {
   g.add(box(W - 1.3, body - 1, .2, M.roof, 0, yb - body / 2, 4.15));
   wave(yb, body, lerp([[0, 1.95], [.15, 1.35], [.3, 1.4], [.5, 1.8], [.62, 2.0], [.72, 1.8], [.85, 2.1], [1, 2.4]]),
     lerp([[0, .15], [.1, .62], [.3, .65], [.5, .85], [.65, .68], [.85, .6], [1, .25]]), g, dir < 0);
-  for (const t of [.07, .5, .82, .93]) win(at(t), 1.9, 2.05, .8, g);
-  win(at(.33), .8, 2.15, .6, g);                                                       // kleines Fenster (Rollstuhlplatz)
-  for (const t of [.2, .68]) doors(at(t), .95, g);
+  // kurzer Wagen (für die Übersicht): weniger Fenster statt gestauchter
+  for (const t of short ? [.1, .5, .9] : [.07, .5, .82, .93]) win(at(t), 1.9, 2.05, .8, g);
+  if (!short) win(at(.33), .8, 2.15, .6, g);                                           // kleines Fenster (Rollstuhlplatz)
+  for (const t of short ? [.3, .7] : [.2, .68]) doors(at(t), .95, g);
   bogies(yb, body, g);
   // Nase: gewölbtes Seitenprofil (Dach läuft in weitem Bogen zur Front), in der Draufsicht durch schmalere Schichten gerundet
   const curve = (k, dz = 0) => {
@@ -91,21 +92,19 @@ function endCar(yFace, L, dir, g) {
 }
 
 // Zug aus vier Wagen (Endwagen, 2 Doppelstockwagen, Endwagen); jeder Wagen mit seinem vorderen Ende bei y = 0 gebaut.
-// setCars(n) zeigt 4, 3 (1., 2., 4.), 2 (1. und 4.) oder 1 Wagen (Endwagen) und rückt sie mittig zusammen – beim Herauszoomen kürzer statt gestaucht.
-const END_L = 26.4, MID_L = 25.4, GAP = .5;
+// setCars(n) zeigt 4, 3 (1., 2., 4.), 2 (1. und 4.) oder 1 Wagen (kurzer Endwagen) und rückt sie mittig zusammen – beim Herauszoomen kürzer statt gestaucht.
+const END_L = 26.4, MID_L = 25.4, SHORT_L = 17, GAP = .5;
 export function buildTrain() {
   const mk = f => { const c = new THREE.Group(); f(c); return c; };
   const cars = [
     { g: mk(c => endCar(0, END_L, 1, c)), L: END_L },
+    { g: mk(c => endCar(0, SHORT_L, 1, c, true)), L: SHORT_L },
     { g: mk(c => deckCar(0, MID_L, c)), L: MID_L },
     { g: mk(c => deckCar(0, MID_L, c)), L: MID_L },
     { g: mk(c => endCar(-END_L, END_L, -1, c)), L: END_L },
   ];
   const train = new THREE.Group(); cars.forEach(c => train.add(c.g));
-  // heller Rand unter dem Zug (nur herausgezoomt sichtbar), damit er sich von Karte und Strecke abhebt
-  const halo = new THREE.Mesh(new THREE.BoxGeometry(1, 1, .05), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .92, depthWrite: false }));
-  halo.position.z = .03; train.add(halo); train.halo = halo;
-  const SHOW = { 4: [0, 1, 2, 3], 3: [0, 1, 3], 2: [0, 3], 1: [0] };
+  const SHOW = { 4: [0, 2, 3, 4], 3: [0, 2, 4], 2: [0, 4], 1: [1] };
   train.setCars = n => {
     if (train.cars === n) return; train.cars = n;
     const vis = SHOW[n].map(i => cars[i]), total = vis.reduce((s, c) => s + c.L, 0) + GAP * (vis.length - 1);
@@ -114,14 +113,12 @@ export function buildTrain() {
     for (const c of vis) { c.g.position.y = y; y -= c.L + GAP; }
     train.len = total;
   };
-  // Randbreite in Metern (Modellmaß), ausgeschaltet bei 0
-  train.setHalo = m => { halo.visible = m > 0; if (m > 0) halo.scale.set(2.9 + 2 * m, train.len + 2 * m, 1); };
   train.setCars(4);
   return train;
 }
 
 /** Benutzerdefinierte MapLibre-Ebene: ein 3D-Zug an einer Position, in Fahrtrichtung gedreht. */
-const LIVERY = { db: 0xec0016, arverio: 0x2b7fd4, other: 0x6e6e73 };
+const LIVERY = { db: 0xff2b3f, arverio: 0x4aa3ff, other: 0x8e8e93 };
 
 export function createTrainLayer(maplibregl) {
   const TRAIN_WIDTH = 2.9, WIDTH_PX = 12, MIN_WIDTH_PX = 9, MAX_LEN_PX = 110; // Zugbreite in m; Bildschirmmaße beim Herauszoomen
@@ -131,7 +128,7 @@ export function createTrainLayer(maplibregl) {
     onAdd(map, gl) {
       this.map = map;
       this.camera = new THREE.Camera(); this.scene = new THREE.Scene();
-      this.scene.add(new THREE.AmbientLight(0xffffff, 2.1));
+      this.scene.add(new THREE.AmbientLight(0xffffff, 2.6));
       const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(-.4, -.7, 1).normalize(); this.scene.add(sun);
       this.train = buildTrain(); this.scene.add(this.train);
       this.renderer = new THREE.WebGLRenderer({ canvas: map.getCanvas(), context: gl, antialias: true });
@@ -145,7 +142,6 @@ export function createTrainLayer(maplibregl) {
       const z = this.map.getZoom(), mpp = 40075016.686 * Math.cos(state.lonlat[1] * Math.PI / 180) / (512 * 2 ** z);
       this.train.setCars(z >= 18 ? 4 : z >= 16.5 ? 3 : 1);
       const s = Math.max(1, MIN_WIDTH_PX * mpp / TRAIN_WIDTH, Math.min(WIDTH_PX * mpp / TRAIN_WIDTH, MAX_LEN_PX * mpp / this.train.len));
-      this.train.setHalo(s > 1.5 ? 2 * mpp / s : 0); // 2 px Rand
       const unit = mc.meterInMercatorCoordinateUnits();
       // Reihenfolge (von rechts): vergrößern, in Fahrtrichtung drehen, nach Mercator (y gespiegelt)
       const model = new THREE.Matrix4().makeTranslation(mc.x, mc.y, mc.z)
