@@ -44,3 +44,21 @@ export function splitRoute(line, p) {
   const ahead = pointAt(line, cum, Math.min(total, along + 40));
   return { off: best.d, along, remaining: Math.max(0, total - along), total, done: [...line.slice(0, best.i + 1), best.pt], rest: [best.pt, ...line.slice(best.i + 1)], bearing: bearing(best.pt, ahead) };
 }
+
+/**
+ * Hängt einen Gleisabschnitt an eine Linie an. Enden beide auf verschiedenen Nachbargleisen (Versatz bis 60 m),
+ * wird der Übergang über ±`blend` m schräg verbunden statt mit einem Quersprung (sonst V-Form am Bahnhof).
+ */
+export function appendSeg(line, seg, blend = 60) {
+  const last = line[line.length - 1];
+  if (!last) { line.push(...seg); return line; }
+  const gap = dist(last, seg[0]);
+  if (gap < 0.5) { line.push(...seg.slice(1)); return line; }
+  if (gap > 60) { line.push(...seg); return line; }
+  let walked = 0;
+  while (line.length > 1 && walked + dist(line[line.length - 2], line[line.length - 1]) < blend) { walked += dist(line[line.length - 2], line[line.length - 1]); line.pop(); }
+  let i = 0; walked = 0;
+  while (i < seg.length - 2 && walked + dist(seg[i], seg[i + 1]) < blend) { walked += dist(seg[i], seg[i + 1]); i++; }
+  line.push(...seg.slice(i));
+  return line;
+}

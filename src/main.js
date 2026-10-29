@@ -4,7 +4,7 @@ import './style.css';
 import * as api from './api.js';
 import { prepare, positionAt } from './train.js';
 import { expectedDelay, record, histKey } from './predict.js';
-import { dist, splitRoute, bearing as bearingTo } from './geo.js';
+import { dist, splitRoute, bearing as bearingTo, appendSeg } from './geo.js';
 import { createTrainLayer } from './train3d.js';
 import { createGpsFilter } from './gps.js';
 import { ICON } from './icons.js';
@@ -325,9 +325,7 @@ async function selectTrip(id, fit, soft = false) {
 function buildLine(st, segs) {
   const line = [];
   segs.forEach((c, i) => {
-    const seg = c && c.length > 1 ? c : [st[i].lonlat, st[i + 1].lonlat];
-    const last = line[line.length - 1];
-    line.push(...(last && dist(last, seg[0]) < 0.5 ? seg.slice(1) : seg));
+    appendSeg(line, c && c.length > 1 ? c : [st[i].lonlat, st[i + 1].lonlat]);
   });
   return line;
 }
@@ -342,9 +340,7 @@ async function segmentCoords(a, b, onPart) {
   const combine = () => {
     const out = [];
     via.slice(0, -1).forEach((p, k) => {
-      const seg = parts[k] && parts[k].length > 1 ? parts[k] : [p.ll, via[k + 1].ll];
-      const last = out[out.length - 1];
-      out.push(...(last && dist(last, seg[0]) < 0.5 ? seg.slice(1) : seg));
+      appendSeg(out, parts[k] && parts[k].length > 1 ? parts[k] : [p.ll, via[k + 1].ll]);
     });
     return out;
   };
