@@ -47,11 +47,12 @@ export async function railFromTiles(template, a, b) {
   const bufs = await Promise.all(tiles.map(t => fetch(template.replace('{z}', t.z).replace('{x}', t.x).replace('{y}', t.y)).then(r => (r.ok ? r.arrayBuffer() : null)).catch(() => null)));
   const missing = bufs.filter(x => !x).length;
   if (missing === bufs.length) return { path: null, why: 'Kacheln nicht erreichbar' };
-  // erst nur Hauptgleise; findet sich kein Weg (z. B. Bahnsteiggleise im Hbf als Nebengleis eingetragen), mit allen Gleisen
+  // erst nur Hauptgleise; findet sich kein Weg (z. B. Bahnsteiggleise im Hbf als Nebengleis eingetragen), mit allen Gleisen;
+  // zuletzt Lücken in den Kartendaten (z. B. an Brücken, bis 40 m) überbrücken
   let why = '';
-  for (const all of [false, true]) {
+  for (const [all, stitch] of [[false, 6], [true, 6], [true, 40]]) {
     const lines = bufs.flatMap((buf, i) => (buf ? railLinesFromTile(new Uint8Array(buf), tiles[i], all) : []));
-    const g = buildGraphFromLines(lines), path = shortestPath(g, a, b, 400);
+    const g = buildGraphFromLines(lines, stitch), path = shortestPath(g, a, b, 400);
     if (path) return { path: smoothPath(path) };
     const sa = nearestOnEdge(g, a, 1e9), sb = nearestOnEdge(g, b, 1e9), m = s => (s ? Math.round(meters(s.p, s === sa ? a : b)) + ' m' : '–');
     why = `${tiles.length} Kacheln z${tiles[0].z}${missing ? `, ${missing} fehlen` : ''}, ${lines.length} Gleisstücke, Abstand zum Gleis ${m(sa)} / ${m(sb)}`;

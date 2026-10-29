@@ -37,8 +37,12 @@ class Heap { // Min-Heap für Dijkstra
 
 /** Nächster Punkt auf einem Gleisstück (Projektion), nicht nur auf einem Stützpunkt */
 export function nearestOnEdge(g, ll, maxDist = 600) {
-  let best = null, bd = maxDist;
-  const kx = Math.cos(ll[1] * Math.PI / 180);
+  return nearEdges(g, ll, maxDist, 0)[0] || null;
+}
+
+/** Projektionen auf alle Gleisstücke bis `slack` m weiter weg als das nächste (nächstes zuerst) */
+function nearEdges(g, ll, maxDist, slack) {
+  const kx = Math.cos(ll[1] * Math.PI / 180), all = [];
   for (const [a, list] of g.adj) {
     const A = g.pos.get(a);
     for (const { to: b } of list) {
@@ -46,35 +50,43 @@ export function nearestOnEdge(g, ll, maxDist = 600) {
       const B = g.pos.get(b), dx = (B[0] - A[0]) * kx, dy = B[1] - A[1], l2 = dx * dx + dy * dy;
       const t = l2 ? Math.max(0, Math.min(1, (((ll[0] - A[0]) * kx) * dx + (ll[1] - A[1]) * dy) / l2)) : 0;
       const p = [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t], d = meters(p, ll);
-      if (d < bd) { bd = d; best = { a, b, p }; }
+      if (d < maxDist) all.push({ a, b, p, d });
     }
   }
-  return best;
+  all.sort((x, y) => x.d - y.d);
+  return all.filter(e => e.d <= all[0].d + slack);
 }
 
 /**
  * Kürzester Weg entlang der Gleise von startLL nach endLL. Start und Ziel werden auf den nächsten Punkt eines
  * Gleisstücks gesetzt (Projektion) – so endet der Weg genau am Bahnhof und fährt nicht bis zum nächsten Stützpunkt
- * weiter und wieder zurück. null, wenn nicht verbunden oder zu weit von den Gleisen.
+ * weiter und wieder zurück. Auch Nachbargleise bis 30 m weiter weg kommen in Frage: auf zweigleisigen Strecken
+ * ohne eingetragene Weichen liegen Start und Ziel sonst oft auf verschiedenen, nie verbundenen Gleisen.
+ * null, wenn nicht verbunden oder zu weit von den Gleisen.
  */
 export function shortestPath(g, startLL, endLL, maxSnap = 600) {
-  const s = nearestOnEdge(g, startLL, maxSnap), t = nearestOnEdge(g, endLL, maxSnap);
-  if (!s || !t) return null;
-  if ((s.a === t.a && s.b === t.b)) return [s.p, t.p]; // gleiches Gleisstück
-  const S = '#start', T = '#ziel', extra = new Map([[S, [{ to: s.a, w: meters(s.p, g.pos.get(s.a)) }, { to: s.b, w: meters(s.p, g.pos.get(s.b)) }]]]);
-  const toT = new Map([[t.a, meters(t.p, g.pos.get(t.a))], [t.b, meters(t.p, g.pos.get(t.b))]]);
+  const ss = nearEdges(g, startLL, maxSnap, 30), ts = nearEdges(g, endLL, maxSnap, 30);
+  if (!ss.length || !ts.length) return null;
+  const [s, t] = [ss[0], ts[0]];
+  if (s.a === t.a && s.b === t.b) return [s.p, t.p]; // gleiches Gleisstück
+  const S = '#start', T = '#ziel', at = new Map(), toT = new Map();
+  const extra = new Map([[S, ss.map((e, i) => ({ to: '#s' + i, w: e.d }))]]);
+  ss.forEach((e, i) => { at.set('#s' + i, e.p); extra.set('#s' + i, [{ to: e.a, w: meters(e.p, g.pos.get(e.a)) }, { to: e.b, w: meters(e.p, g.pos.get(e.b)) }]); });
+  ts.forEach((e, i) => {
+    at.set('#t' + i, e.p); extra.set('#t' + i, [{ to: T, w: e.d }]);
+    for (const n of [e.a, e.b]) (toT.get(n) || toT.set(n, []).get(n)).push({ to: '#t' + i, w: meters(e.p, g.pos.get(n)) });
+  });
   const dist = new Map([[S, 0]]), prev = new Map(), heap = new Heap(); heap.push(0, S);
   while (heap.size) {
     const [d, u] = heap.pop();
     if (u === T) break;
     if (d > (dist.get(u) ?? Infinity)) continue;
-    const out = [...(extra.get(u) || g.adj.get(u) || [])];
-    if (toT.has(u)) out.push({ to: T, w: toT.get(u) });
+    const out = [...(extra.get(u) || g.adj.get(u) || []), ...(toT.get(u) || [])];
     for (const { to, w } of out) { const nd = d + w; if (nd < (dist.get(to) ?? Infinity)) { dist.set(to, nd); prev.set(to, u); heap.push(nd, to); } }
   }
   if (!dist.has(T)) return null;
-  const ids = [T]; while (ids[0] !== S) ids.unshift(prev.get(ids[0]));
-  return ids.map(id => (id === S ? s.p : id === T ? t.p : g.pos.get(id)));
+  const ids = [prev.get(T)]; while (prev.get(ids[0]) !== S) ids.unshift(prev.get(ids[0]));
+  return ids.map(id => at.get(id) || g.pos.get(id));
 }
 
 /** Punkte ausdünnen (mindestens minGap Meter Abstand; Anfang und Ende bleiben). */
@@ -125,7 +137,11 @@ export function buildGraphFromLines(lines, stitch = 6) {
       if (!pos.has(id)) { pos.set(id, p); lineOf.set(id, li); }
       if (prev && prev !== id) { const w = meters(pos.get(prev), p); link(prev, id, w); link(id, prev, w); }
       prev = id;
-      if (i === 0 || i === ln.length - 1) ends.push([id, li]);
+      if (i === 0 || i === ln.length - 1) {
+        const q = ln[i === 0 ? 1 : ln.length - 2], kx = Math.cos(p[1] * Math.PI / 180);
+        const dx = q ? (p[0] - q[0]) * kx : 0, dy = q ? p[1] - q[1] : 0, l = Math.hypot(dx, dy);
+        ends.push([id, li, l ? [dx / l, dy / l] : null]); // Richtung aus der Linie hinaus
+      }
     });
   });
   // Linienenden mit dem nächsten Punkt auf einem Gleisstück einer anderen Linie verbinden (nicht nur mit Stützpunkten:
@@ -138,21 +154,27 @@ export function buildGraphFromLines(lines, stitch = 6) {
     for (let x = Math.floor(Math.min(p[0], q[0]) / C) - 1; x <= Math.floor(Math.max(p[0], q[0]) / C) + 1; x++)
       for (let y = Math.floor(Math.min(p[1], q[1]) / C) - 1; y <= Math.floor(Math.max(p[1], q[1]) / C) + 1; y++) { const k = x + ':' + y; (grid.get(k) || grid.set(k, []).get(k)).push(si); }
   });
-  for (const [id, li] of ends) {
-    const p = pos.get(id), k = Math.floor(p[0] / C) + ':' + Math.floor(p[1] / C);
-    let best = null, bd = stitch;
+  // je Linienende: nächstes Gleisstück überhaupt und nächstes in Fahrtrichtung voraus (überbrückt Datenlücken, statt nur
+  // ans 4 m entfernte Parallelgleis anzuschließen)
+  for (const [id, li, dir] of ends) {
+    const p = pos.get(id), kx = Math.cos(p[1] * Math.PI / 180), k = Math.floor(p[0] / C) + ':' + Math.floor(p[1] / C);
+    let best = null, bd = stitch, ahead = null, ad = stitch;
     for (const si of grid.get(k) || []) {
       const [a, b, sl] = segs[si]; if (sl === li) continue;
-      const A = pos.get(a), B = pos.get(b), kx = Math.cos(p[1] * Math.PI / 180);
+      const A = pos.get(a), B = pos.get(b);
       const dx = (B[0] - A[0]) * kx, dy = B[1] - A[1], l2 = dx * dx + dy * dy;
       const t = l2 ? Math.max(0, Math.min(1, (((p[0] - A[0]) * kx) * dx + (p[1] - A[1]) * dy) / l2)) : 0;
       const proj = [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t], d = meters(p, proj);
       if (d < bd) { bd = d; best = { a, b, proj }; }
+      const vx = (proj[0] - p[0]) * kx, vy = proj[1] - p[1], vl = Math.hypot(vx, vy);
+      if (dir && d < ad && d > 1 && (vx * dir[0] + vy * dir[1]) / vl > 0.8) { ad = d; ahead = { a, b, proj }; }
     }
-    if (!best) continue;
-    const pid = key(best.proj);
-    if (!pos.has(pid)) pos.set(pid, best.proj);
-    for (const o of [best.a, best.b, id]) if (o !== pid) { const w = meters(pos.get(o), best.proj); link(pid, o, w); link(o, pid, w); }
+    for (const hit of [best, ahead]) {
+      if (!hit) continue;
+      const pid = key(hit.proj);
+      if (!pos.has(pid)) pos.set(pid, hit.proj);
+      for (const o of [hit.a, hit.b, id]) if (o !== pid) { const w = meters(pos.get(o), hit.proj); link(pid, o, w); link(o, pid, w); }
+    }
   }
   return { pos, adj };
 }

@@ -60,3 +60,19 @@ test('kein Überschießen: Halt mitten auf langem Gleisstück', () => {
   assert.ok(lons.every((x, i) => i === 0 || x >= lons[i - 1]), 'monoton, ohne Umkehr');
   assert.ok(Math.abs(lons[0] - 10.0135) < 1e-6 && Math.abs(lons.at(-1) - 10.04) < 1e-6);
 });
+
+test('zweigleisig ohne Weichen: Start und Ziel auf verschiedenen Gleisen werden trotzdem verbunden', () => {
+  // zwei parallele Gleise 8 m auseinander, nie verbunden; Start liegt näher am Nordgleis, Ziel näher am Südgleis
+  const n = [[11.0, 48.20007], [11.02, 48.20007]], s = [[11.0, 48.2], [11.02, 48.2]];
+  const p = shortestPath(buildGraphFromLines([n, s]), [11.001, 48.2001], [11.019, 48.19998]);
+  assert.ok(p, 'Weg gefunden');
+  assert.ok(meters(p[0], p[p.length - 1]) > 1300);
+});
+
+test('Datenlücke im Gleis (z. B. an Brücken) wird in Fahrtrichtung überbrückt, nicht nur ans Parallelgleis gehängt', () => {
+  // zwei Gleise 4 m auseinander, beide mit 25 m Lücke an derselben Stelle (wie an einer Kachelecke oder Brücke)
+  const gap = (lat) => [[[11.0, lat], [11.01, lat]], [[11.01034, lat], [11.02, lat]]];
+  const lines = [...gap(48.20004), ...gap(48.2)];
+  assert.equal(shortestPath(buildGraphFromLines(lines), [11.0, 48.20004], [11.02, 48.20004]), null, 'mit 6 m keine Verbindung');
+  assert.ok(shortestPath(buildGraphFromLines(lines, 40), [11.0, 48.20004], [11.02, 48.20004]));
+});
