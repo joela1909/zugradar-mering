@@ -22,7 +22,7 @@ Bahnhofskoordinaten stammen aus `stations.json` (erzeugt mit `node scripts/build
 
 ## Gleisgeometrie
 
-`/api/rail?from=<EVA>&to=<EVA>` holt die Gleise zwischen zwei Halten aus OpenStreetMap (Overpass, `railway=rail`, ODbL), berechnet den kürzesten Weg (`rail.js`) und speichert ihn 30 Tage im Edge-Cache; der Browser merkt sich jeden Abschnitt dauerhaft. Die Zugposition läuft damit entlang der echten Gleise.
+Hochzoll – Kissing – Mering-St Afra – Mering – Althegnenberg ist fest hinterlegt (`src/tracks.js`, geglätteter Spline durch vorgegebene Punkte). Alle übrigen Abschnitte holt das Handy selbst aus OpenStreetMap (Overpass, `railway=rail`, ODbL): kürzester Gleisweg und Glättung in `rail.js`, Anfragen nacheinander, jeder Abschnitt dauerhaft im Browser gemerkt. Die Overpass-Server bedienen Cloudflare-Worker nicht, deshalb läuft die Abfrage im Browser; `/api/rail` im Worker bleibt als Reserve.
 
 ## Bahn-Kontingent
 

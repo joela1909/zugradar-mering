@@ -28,3 +28,14 @@ test('ausdünnen + Abfrage', () => {
   assert.match(overpassQuery([10, 48], [10.1, 48.1]), /railway.*rail.*out geom/);
   assert.ok(Math.abs(meters([10, 48], [10, 48.001]) - 111) < 2);
 });
+import { smoothPath } from './rail.js';
+test('glätten: Endpunkte bleiben, Zacken verschwinden, Kurven bleiben nah', () => {
+  const zig = Array.from({ length: 60 }, (_, i) => [10 + i * 0.0003, 48 + (i % 2) * 0.00004]); // 4-m-Zacken
+  const s = smoothPath(zig);
+  assert.deepEqual(s[0], zig[0]); assert.deepEqual(s.at(-1), zig.at(-1));
+  const mid = s.slice(3, -3); const spread = Math.max(...mid.map(p => p[1])) - Math.min(...mid.map(p => p[1]));
+  assert.ok(spread * 111000 < 1.5, 'Zacken < 1,5 m');
+  const arc = Array.from({ length: 50 }, (_, i) => { const a = i / 49 * Math.PI / 2; return [10 + Math.sin(a) * 0.01, 48 + (1 - Math.cos(a)) * 0.007]; });
+  const sa = smoothPath(arc); const d = Math.max(...sa.map(p => Math.min(...arc.map(q => meters(p, q)))));
+  assert.ok(d < 15, 'Kurve weicht < 15 m ab: ' + d.toFixed(1));
+});

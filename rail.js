@@ -65,3 +65,21 @@ export function overpassQuery(a, b, pad = 0.03) {
   const f = x => x.toFixed(5);
   return `[out:json][timeout:25];way["railway"="rail"]["service"!~"yard|siding|spur|crossover"](${f(s)},${f(w)},${f(n)},${f(e)});out geom qt;`;
 }
+
+/** Glättet einen Gleisweg (gleitender Mittelwert über ±`radius` m), damit Gleiswechsel keine Zacken erzeugen. */
+export function smoothPath(coords, radius = 30, step = 10) {
+  if (!coords || coords.length < 3) return coords;
+  const rs = [coords[0]];
+  for (let i = 1; i < coords.length; i++) {
+    const a = coords[i - 1], b = coords[i], d = meters(a, b), n = Math.max(1, Math.round(d / step));
+    for (let k = 1; k <= n; k++) rs.push([a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]);
+  }
+  const w = Math.max(1, Math.round(radius / step)), out = [rs[0]];
+  for (let i = 1; i < rs.length - 1; i++) {
+    const lo = Math.max(0, i - w), hi = Math.min(rs.length - 1, i + w), m = Math.min(i - lo, hi - i); // symmetrisch, an den Enden kleiner
+    let x = 0, y = 0; for (let j = i - m; j <= i + m; j++) { x += rs[j][0]; y += rs[j][1]; }
+    out.push([x / (2 * m + 1), y / (2 * m + 1)]);
+  }
+  out.push(rs[rs.length - 1]);
+  return thin(out, 8);
+}

@@ -297,7 +297,7 @@ async function selectTrip(id, fit, soft = false) {
     S.tr = { ...prepare(t.stopovers, line), raw: t, dep, stopIdx };
     S.railColor = railColorFor(t);
     map.getSource('rail').setData(lineFeat(line, { color: S.railColor }));
-    if (!S.railLines.has(id)) refineRail(S.tr, id);
+    refineRail(S.tr, id); // aus dem Speicher sofort, fehlende Abschnitte werden nachgeholt
     S.stopLabels = [];
     t.stopovers.forEach((s, i) => {
       if (i === stopIdx || dist(s.lonlat, S.station.lonlat) < 900) return;
@@ -318,20 +318,25 @@ function buildLine(st, segs) {
 }
 async function refineRail(tr, tripId) {
   const st = tr.raw.stopovers;
-  const fixed = st.slice(0, -1).map((s, i) => corridorSegment(s.id, st[i + 1].id));
-  let cur = tr;
-  const apply = segs => {
-    if (S.sel !== tripId || S.tr !== cur) return false;
+  const segs = st.slice(0, -1).map((s, i) => corridorSegment(s.id, st[i + 1].id));
+  let pending = null;
+  const apply = () => {
+    if (S.sel !== tripId || !S.tr) return false; // auch nach automatischer Aktualisierung (neues S.tr, gleiche Halte) weiterzeichnen
     const line = buildLine(st, segs);
     S.railLines.set(tripId, line); if (S.railLines.size > 30) S.railLines.delete(S.railLines.keys().next().value);
-    cur = S.tr = { ...cur, ...prepare(st, line) };
+    S.tr = { ...S.tr, ...prepare(S.tr.raw.stopovers, line) };
     map.getSource('rail').setData(lineFeat(line, { color: S.railColor }));
     tick(); scheduleLayout(); return true;
   };
-  if (fixed.some(Boolean) && !apply(fixed)) return;
+  if (segs.some(Boolean) && !apply()) return;
   if (!S.live) return;
-  const segs = await Promise.all(st.slice(0, -1).map((s, i) => fixed[i] || api.rail(s.id, st[i + 1].id)));
-  if (segs.some((c, i) => c && !fixed[i])) apply(segs);
+  // übrige Abschnitte aus OSM, nahe Halte zuerst; jeder fertige Abschnitt wird sofort gezeichnet
+  const order = segs.map((_, i) => i).filter(i => !segs[i]).sort((x, y) => Math.abs(x - tr.stopIdx) - Math.abs(y - tr.stopIdx));
+  await Promise.all(order.map(i => api.rail(st[i].id, st[i + 1].id, st[i].lonlat, st[i + 1].lonlat).then(c => {
+    if (!c) return;
+    segs[i] = c;
+    clearTimeout(pending); pending = setTimeout(apply, 150);
+  })));
 }
 
 function fitAll() {

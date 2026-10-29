@@ -1,3 +1,4 @@
+import { buildGraph, shortestPath, smoothPath, overpassQuery } from '../rail.js';
 const BASE = '/api';
 const j = async (u, o) => {
   const r = await fetch(u, o);
@@ -82,18 +83,42 @@ export function demo(now = new Date()) {
   return { station, deps, trip: id => Promise.resolve({ ...trips[+id.slice(4)].trip, currentLocation: null }) };
 }
 
-/** Gleisverlauf zwischen zwei Halten (EVA); lokal dauerhaft gemerkt, "kein Ergebnis" einen Tag lang. */
-export async function rail(a, b) {
-  const k = `zr.rail.v1.${a}.${b}`;
-  try { const c = JSON.parse(localStorage.getItem(k)); if (c && (c.c || Date.now() - c.t < 864e5)) return c.c; } catch {}
-  try {
-    const r = await j(`${BASE}/rail?from=${encodeURIComponent(a)}&to=${encodeURIComponent(b)}`);
-    try { localStorage.setItem(k, JSON.stringify({ c: r.coords, t: Date.now() })); } catch {}
-    return r.coords;
-  } catch (e) {
-    if (/^404/.test(e.message)) { try { localStorage.setItem(k, JSON.stringify({ c: null, t: Date.now() })); } catch {} }
-    return null;
+/**
+ * Gleisverlauf zwischen zwei Halten aus OpenStreetMap. Das Handy fragt Overpass selbst
+ * (Cloudflare wird von den Overpass-Servern nicht bedient); Anfragen laufen nacheinander,
+ * jeder Abschnitt wird dauerhaft gemerkt, „kein Gleisweg“ einen Tag lang.
+ */
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+let overpassQueue = Promise.resolve();
+const pause = ms => new Promise(r => setTimeout(r, ms));
+async function overpassFetch(query) {
+  for (const u of OVERPASS) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 25000);
+      try {
+        const r = await fetch(`${u}?data=${encodeURIComponent(query)}`, { signal: ctl.signal });
+        if (r.status === 429 || r.status === 504) { await pause(4000); continue; } // ausgelastet: kurz warten, nochmal
+        if (r.ok) return await r.json();
+        break;
+      } catch { break; } finally { clearTimeout(t); }
+    }
   }
+  return null;
+}
+export async function rail(a, b, aLL, bLL) {
+  const k = `zr.rail.v2.${a}.${b}`;
+  try { const c = JSON.parse(localStorage.getItem(k)); if (c && (c.c || Date.now() - c.t < 864e5)) return c.c; } catch {}
+  if (!aLL || !bLL) return null;
+  const job = overpassQueue.then(async () => {
+    const data = await overpassFetch(overpassQuery(aLL, bLL, 0.012));
+    if (!data) return undefined; // nicht erreichbar: nichts merken, später neu versuchen
+    const path = shortestPath(buildGraph(data.elements), aLL, bLL);
+    return path ? smoothPath(path).map(([x, y]) => [+x.toFixed(6), +y.toFixed(6)]) : null;
+  });
+  overpassQueue = job.then(() => pause(400), () => pause(400));
+  const coords = await job.catch(() => undefined);
+  if (coords !== undefined) { try { localStorage.setItem(k, JSON.stringify({ c: coords, t: Date.now() })); } catch {} }
+  return coords ?? null;
 }
 
 /** Auslastung des Bahn-Kontingents (Anfragen der letzten Minute) */
