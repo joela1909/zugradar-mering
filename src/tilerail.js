@@ -30,10 +30,20 @@ export function railLinesFromTile(buf, { x, y, z }) {
   return out;
 }
 
+/**
+ * Kacheln für einen Abschnitt: Suchbereich wächst mit der Länge (Gleise weichen von der Luftlinie ab);
+ * bei langen Abschnitten (z. B. Pasing – Mering ohne Halt) eine gröbere Stufe, die die Strecken ebenfalls enthält.
+ */
+export function pickTiles(a, b, max = 40) {
+  const span = Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1])), pad = 0.006 + span * 0.12;
+  for (const z of [14, 13, 12, 11]) { const t = tilesFor(a, b, pad, z); if (t.length <= max) return t; }
+  return null;
+}
+
 /** Gleisweg von a nach b aus den Kacheln; null, wenn keine Verbindung gefunden wurde */
 export async function railFromTiles(template, a, b) {
-  const tiles = tilesFor(a, b);
-  if (tiles.length > 40) return null;
+  const tiles = pickTiles(a, b);
+  if (!tiles) return null;
   const bufs = await Promise.all(tiles.map(t => fetch(template.replace('{z}', t.z).replace('{x}', t.x).replace('{y}', t.y)).then(r => (r.ok ? r.arrayBuffer() : null)).catch(() => null)));
   if (bufs.every(x => !x)) throw new Error('Kacheln nicht erreichbar');
   const lines = bufs.flatMap((buf, i) => (buf ? railLinesFromTile(new Uint8Array(buf), tiles[i]) : []));
