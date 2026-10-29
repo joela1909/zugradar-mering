@@ -21,8 +21,9 @@ const store = { get: (k, f) => { try { return JSON.parse(localStorage.getItem(k)
 const MODES = { car: ['🚗', 'Auto'], bike: ['🚲', 'Rad'], foot: ['🚶', 'zu Fuß'] };
 
 let liveError = '';
-const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home2', HOME_FALLBACK), mode: store.get('zr.mode2', 'car'), walk: null, trainMarker: null, board: false, fitFull: false, nav: false, follow: true, walkRemain: null, wake: null, d3: store.get('zr.3d', true), markers: [], dir: store.get('zr.dir', 'muenchen'), me: null, meMarker: null, track: store.get('zr.track', false), trackTotal: 0, watch: null, lastRoute: { ll: null, t: 0 } };
-const vis = () => S.deps.filter(d => matchesDir(d, S.dir));
+const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home2', HOME_FALLBACK), mode: store.get('zr.mode2', 'car'), walk: null, trainMarker: null, board: false, strict: store.get('zr.strict', true), fitFull: false, nav: false, follow: true, walkRemain: null, wake: null, d3: store.get('zr.3d', true), markers: [], dir: store.get('zr.dir', 'muenchen'), me: null, meMarker: null, track: store.get('zr.track', false), trackTotal: 0, watch: null, lastRoute: { ll: null, t: 0 } };
+const vis = () => S.deps.filter(d => (S.strict ? matchesDir(d, S.dir) : dirOf(d) === S.dir));
+const RULE = { augsburg: 'ab München Hbf/Pasing', muenchen: 'über München-Pasing/Hbf' };
 const DIRS = { muenchen: 'München', augsburg: 'Augsburg' };
 
 const map = new maplibregl.Map({ container: 'map', style: 'https://tiles.openfreemap.org/styles/positron', center: S.station.lonlat, zoom: 12, pitch: store.get('zr.3d', true) ? 55 : 0, maxPitch: 75, attributionControl: { compact: true } });
@@ -274,7 +275,16 @@ function prediction() {
 function render() {
   const list = vis(), i = list.findIndex(d => d.tripId === S.sel), dep = list[i];
   $('board').hidden = !S.board;
-  if (!dep) { $('tag').className = 'glass tag'; $('tag').innerHTML = `<div class="sub">Keine Abfahrten Richtung ${DIRS[S.dir]} gefunden.</div>`; $('board').hidden = true; return; }
+  if (!dep) {
+    const loose = S.strict ? S.deps.filter(d => dirOf(d) === S.dir && !d.cancelled).length : 0;
+    $('tag').className = 'glass tag';
+    $('tag').innerHTML = `<div class="row top"><span class="dir">Keine Abfahrten Richtung ${DIRS[S.dir]}</span></div>
+      <div class="sub" style="margin-top:6px">${S.strict ? `Gefiltert: nur Züge ${RULE[S.dir]}. ` : ''}${S.deps.length ? `${S.deps.length} Abfahrten in den nächsten 4 Stunden insgesamt.` : 'Die Bahn liefert gerade keine Abfahrten.'}</div>
+      ${loose ? `<button class="navbtn" id="loose">${loose} weitere Züge Richtung ${DIRS[S.dir]} zeigen</button>` : ''}`;
+    $('board').hidden = true;
+    const lb = $('loose'); if (lb) lb.onclick = e => { e.stopPropagation(); S.strict = false; store.set('zr.strict', false); S.sel = pickDefault()?.tripId; selectTrip(S.sel, true); };
+    return;
+  }
   const p = prediction(), walkMin = S.walk ? Math.ceil(remainS() / 60) : null;
   const dMin = dep.cancelled ? 0 : (p ? p.e.min : dep.delay ?? 0);
   const leave = p && walkMin != null ? addMin(p.depT, -walkMin - 1) : null;
@@ -317,10 +327,12 @@ function renderBoard(list, i, dep, p) {
     dep.plannedPlatform && dep.platform !== dep.plannedPlatform && kv('Gleiswechsel', `<span class="late">Gl. ${dep.platform} statt ${dep.plannedPlatform}</span>`),
     (dep.previousStops?.length || dep.nextStops?.length) && kv('Verlauf', [...(dep.previousStops || []).slice(-2), '<b>Mering St Afra</b>', ...(dep.nextStops || []).slice(0, 3)].join(' › ')),
     kv('Weg zum Bahnhof', `<button id="modebtn" class="pillbtn">${MODES[S.mode][0]} ${MODES[S.mode][1]} ⇄</button>`),
+    kv('Richtungsfilter', `<button id="strictbtn" class="pillbtn">${S.strict ? 'An · ' + RULE[S.dir] : 'Aus'} ⇄</button>`),
     kv('Quelle', S.live ? 'DB Live' : 'Demo'),
   ].filter(Boolean).join('');
   $('board').innerHTML = `<div class="bh"><b>Nächste Verbindungen</b><span class="sub">→ ${DIRS[S.dir]}</span></div><div class="blist">${rows || '<div class="sub" style="padding:8px 4px">Keine weiteren Verbindungen.</div>'}</div><div class="bd2">${details}</div>`;
   $('board').querySelectorAll('.brow').forEach(b => b.onclick = e => { e.stopPropagation(); selectTrip(b.dataset.id, true); });
+  const sb = $('strictbtn'); if (sb) sb.onclick = e => { e.stopPropagation(); S.strict = !S.strict; store.set('zr.strict', S.strict); S.sel = vis().some(d => d.tripId === S.sel) ? S.sel : pickDefault()?.tripId; selectTrip(S.sel, false); };
   const m = $('modebtn'); if (m) m.onclick = e => { e.stopPropagation(); const k = Object.keys(MODES); S.mode = k[(k.indexOf(S.mode) + 1) % k.length]; store.set('zr.mode2', S.mode); loadWalk().then(render); };
 }
 
