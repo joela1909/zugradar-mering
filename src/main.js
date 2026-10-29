@@ -8,6 +8,7 @@ import { dist, splitRoute, bearing as bearingTo } from './geo.js';
 import { createTrainLayer } from './train3d.js';
 import { createGpsFilter } from './gps.js';
 import { ICON } from './icons.js';
+import { corridorSegment } from './tracks.js';
 import { dirOf, matchesDir, startName, timeProgress, distProgress, minutesUntil, buffer, stopFractions, livery } from './progress.js';
 
 const HOME_ADDRESS = 'Koloniestraße 26, 86399 Bobingen';
@@ -309,18 +310,28 @@ async function selectTrip(id, fit, soft = false) {
   if (fit) fitAll();
 }
 
-// Gerade Linien durch echte Gleise ersetzen (Abschnitt für Abschnitt aus OSM, lokal gemerkt)
-async function refineRail(tr, tripId) {
-  if (!S.live) return;
-  const st = tr.raw.stopovers;
-  const segs = await Promise.all(st.slice(0, -1).map((s, i) => api.rail(s.id, st[i + 1].id)));
-  if (S.sel !== tripId || S.tr !== tr || !segs.some(Boolean)) return;
+// Gerade Linien durch echte Gleise ersetzen: hinterlegte Abschnitte sofort, übrige aus OSM (lokal gemerkt)
+function buildLine(st, segs) {
   const line = [];
   segs.forEach((c, i) => { const seg = c ? [st[i].lonlat, ...c, st[i + 1].lonlat] : [st[i].lonlat, st[i + 1].lonlat]; line.push(...(line.length ? seg.slice(1) : seg)); });
-  S.railLines.set(tripId, line); if (S.railLines.size > 30) S.railLines.delete(S.railLines.keys().next().value);
-  S.tr = { ...tr, ...prepare(st, line) };
-  map.getSource('rail').setData(lineFeat(line, { color: S.railColor }));
-  tick(); layout();
+  return line;
+}
+async function refineRail(tr, tripId) {
+  const st = tr.raw.stopovers;
+  const fixed = st.slice(0, -1).map((s, i) => corridorSegment(s.id, st[i + 1].id));
+  let cur = tr;
+  const apply = segs => {
+    if (S.sel !== tripId || S.tr !== cur) return false;
+    const line = buildLine(st, segs);
+    S.railLines.set(tripId, line); if (S.railLines.size > 30) S.railLines.delete(S.railLines.keys().next().value);
+    cur = S.tr = { ...cur, ...prepare(st, line) };
+    map.getSource('rail').setData(lineFeat(line, { color: S.railColor }));
+    tick(); scheduleLayout(); return true;
+  };
+  if (fixed.some(Boolean) && !apply(fixed)) return;
+  if (!S.live) return;
+  const segs = await Promise.all(st.slice(0, -1).map((s, i) => fixed[i] || api.rail(s.id, st[i + 1].id)));
+  if (segs.some((c, i) => c && !fixed[i])) apply(segs);
 }
 
 function fitAll() {
