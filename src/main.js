@@ -7,6 +7,7 @@ import { expectedDelay, record, histKey } from './predict.js';
 import { dist, splitRoute, bearing as bearingTo } from './geo.js';
 import { createTrainLayer } from './train3d.js';
 import { createGpsFilter } from './gps.js';
+import { ICON } from './icons.js';
 import { dirOf, matchesDir, startName, timeProgress, distProgress, minutesUntil, buffer, stopFractions, livery } from './progress.js';
 
 const HOME_ADDRESS = 'Koloniestraße 26, 86399 Bobingen';
@@ -19,10 +20,10 @@ const cls = m => (m >= 5 ? 'late' : m >= 1 ? 'minor' : 'ontime');
 const addMin = (d, m) => new Date(+d + m * 60000);
 const same = (a, b) => a && b && Math.abs(a - b) < 30000;
 const store = { get: (k, f) => { try { return JSON.parse(localStorage.getItem(k)) ?? f; } catch { return f; } }, set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
-const MODES = { car: ['🚗', 'Auto'], bike: ['🚲', 'Rad'], foot: ['🚶', 'zu Fuß'] };
+const MODES = { car: [ICON.car, 'Auto'], bike: [ICON.bike, 'Rad'], foot: [ICON.foot, 'zu Fuß'] };
 
 let liveError = '';
-const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home2', HOME_FALLBACK), mode: store.get('zr.mode2', 'car'), walk: null, trainMarker: null, board: false, strict: store.get('zr.strict', true), fitFull: false, nav: false, follow: true, walkRemain: null, wake: null, meShown: null, meAnim: null, camTarget: null, railLines: new Map(), stopLabels: [], d3: store.get('zr.3d', true), markers: [], dir: store.get('zr.dir', 'muenchen'), me: null, meMarker: null, track: store.get('zr.track', false), trackTotal: 0, watch: null, lastRoute: { ll: null, t: 0 } };
+const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home2', HOME_FALLBACK), mode: store.get('zr.mode2', 'car'), walk: null, trainMarker: null, sheet: 'half', sheetVis: 220, loading: true, updated: null, limit: null, strict: store.get('zr.strict', true), fitFull: false, nav: false, follow: true, walkRemain: null, wake: null, meShown: null, meAnim: null, camTarget: null, railLines: new Map(), stopLabels: [], d3: store.get('zr.3d', true), markers: [], dir: store.get('zr.dir', 'muenchen'), me: null, meMarker: null, track: store.get('zr.track', false), trackTotal: 0, watch: null, lastRoute: { ll: null, t: 0 } };
 const vis = () => S.deps.filter(d => (S.strict ? matchesDir(d, S.dir) : dirOf(d) === S.dir));
 const RULE = { augsburg: 'ab München Hbf/Pasing', muenchen: 'über München-Pasing/Hbf' };
 const DIRS = { muenchen: 'München', augsburg: 'Augsburg' };
@@ -153,7 +154,7 @@ function layout() {
   const placed = new Grid(), railG = new Grid(), walkG = new Grid();
   points.forEach(r => placed.add(r)); rail.forEach(r => railG.add(r)); walk.forEach(r => walkG.add(r));
   // Bedienelemente sind Hindernisse, und Schilder müssen ganz auf dem Bildschirm liegen
-  [$('dirctl'), $('status'), $('tag'), $('board'), $('toast'), document.querySelector('.fabs')]
+  [$('dirctl'), $('status'), $('sheet'), $('toast'), document.querySelector('.fabs')]
     .filter(e => e && !e.hidden && e.getClientRects().length)
     .forEach(e => { const b = e.getBoundingClientRect(); placed.add({ x1: b.left - 4, y1: b.top - 4, x2: b.right + 4, y2: b.bottom + 4 }); });
   const onScreen = r => r.x1 >= 6 && r.y1 >= 6 && r.x2 <= innerWidth - 6 && r.y2 <= innerHeight - 6;
@@ -182,14 +183,14 @@ let stationMarker, homeMarker, walkMarker, stationDot;
 
 function placeBase() {
   const st0 = S.tr?.stops?.find((_, i) => i === S.tr.stopIdx);
-  const pinHtml = `🚉 ${S.station.name.replace(' (Demo)', '')}${st0 ? `<small>${planTimes(prediction())}</small>` : ''}`;
+  const pinHtml = `${ICON.station} ${stName()}${st0 ? `<small>${planTimes(prediction())}</small>` : ''}`;
   const sameSpot = (m, ll) => m && m.getLngLat().lng === ll[0] && m.getLngLat().lat === ll[1];
   if (sameSpot(stationMarker, S.station.lonlat) && sameSpot(homeMarker, S.home)) { stationMarker.getElement().innerHTML = pinHtml; scheduleLayout(); return; }
   labels = labels.filter(l => l.marker !== stationMarker && l.marker !== homeMarker);
   stationMarker?.remove(); homeMarker?.remove(); stationDot?.remove();
   const st = S.tr?.stops?.find((_, i) => i === S.tr.stopIdx);
-  stationMarker = reg(mk(el('pin', `🚉 ${S.station.name.replace(' (Demo)', '')}${st ? `<small>${planTimes(prediction())}</small>` : ''}`), S.station.lonlat), S.station.lonlat, 1, { essential: true });
-  homeMarker = reg(mk(el('me', '🏠 Koloniestraße 26'), S.home), S.home, 1, { essential: true });
+  stationMarker = reg(mk(el('pin', pinHtml), S.station.lonlat), S.station.lonlat, 1, { essential: true });
+  homeMarker = reg(mk(el('me', `${ICON.home} Koloniestraße 26`), S.home), S.home, 1, { essential: true });
   stationDot = mk(el('dot station', ''), S.station.lonlat);
   layout();
 }
@@ -222,21 +223,32 @@ async function loadWalk() {
   walkMarker._zr = { marker: walkMarker, ll: mid, prio: 2, essential: true, onWalk: true }; labels.push(walkMarker._zr); layout();
 }
 
+function updateStatus() {
+  const m = $('mode'), e = $('err');
+  m.textContent = S.live ? 'LIVE' : 'DEMO';
+  m.className = S.live ? (S.stale ? 'stale' : 'live') : '';
+  e.textContent = !S.live ? humanError(liveError) : S.stale ? `${humanError(liveError)} · Stand ${S.updated ? fmt(S.updated) : '–'}` : '';
+}
 let refreshing = false;
 async function refresh() {
   if (refreshing) return; refreshing = true;
   $('refresh').style.opacity = .4;
   try {
     try {
-      if (!S.live) S.station = await api.findStation();
-      S.deps = await api.departures(S.station); S.live = true; liveError = '';
+      if (!S.station.id) {
+        const c = store.get('zr.station', null); // Bahnhof eine Woche merken: spart beim Start eine Abfrage
+        S.station = c && Date.now() - c.t < 7 * 864e5 ? c.s : await api.findStation();
+        if (!c || Date.now() - c.t >= 7 * 864e5) store.set('zr.station', { s: S.station, t: Date.now() });
+      }
+      S.deps = await api.departures(S.station); S.live = true; S.stale = false; liveError = ''; S.updated = new Date();
     } catch (e) {
-      console.warn('Live-Daten nicht erreichbar, Demo-Modus:', e);
+      console.warn('Live-Daten nicht erreichbar:', e);
       liveError = String(e?.message || e).slice(0, 200);
-      S.live = false; S.demo = api.demo(); S.station = S.demo.station; S.deps = S.demo.deps;
+      if (S.live && S.deps.length) S.stale = true; // kurze Störung: letzte Live-Daten behalten statt auf Demo zu springen
+      else { S.live = false; S.demo = api.demo(); S.station = S.demo.station; S.deps = S.demo.deps; }
     }
-    $('mode').textContent = S.live ? 'LIVE' : 'DEMO'; $('mode').className = S.live ? 'live' : '';
-    $('err').textContent = S.live ? '' : liveError;
+    S.loading = false; updateStatus();
+    if (S.live) api.limit().then(l => { S.limit = l; }).catch(() => {});
     if (!S.sel || !vis().find(d => d.tripId === S.sel)) S.sel = pickDefault()?.tripId;
     await selectTrip(S.sel, false, true);
   } finally { $('refresh').style.opacity = 1; refreshing = false; }
@@ -274,6 +286,7 @@ async function selectTrip(id, fit, soft = false) {
     } catch (e) { console.warn(e); return; }
   }
   S.markers.forEach(m => m.remove()); S.markers = []; dots = []; labels = labels.filter(l => !l.stop);
+  if (dep && S.tr?.dep?.tripId !== id) { S.tr = null; render(); } // Abfahrt sofort, Verlauf kommt gleich
   if (!dep) { S.tr = null; map.getSource('rail').setData(emptyFC); render(); return; }
   try {
     const t = S.live ? await api.trip(id, S.station) : await S.demo.trip(id);
@@ -315,7 +328,7 @@ function fitAll() {
   b.extend(S.home); if (S.me) b.extend(S.me);
   S.walk?.coords.forEach(c => b.extend(c));
   if (S.tr) { b.extend(positionAt(S.tr, new Date()).pos); if (S.fitFull) S.tr.polyline.forEach(c => b.extend(c)); }
-  map.fitBounds(b, { padding: { top: 80, bottom: (S.board ? 440 : 200), left: 70, right: 70 }, maxZoom: 15.5, duration: 800, pitch: S.d3 ? 55 : 0, bearing: 0 });
+  map.fitBounds(b, { padding: { top: 120, bottom: S.sheetVis + 30, left: 70, right: 76 }, maxZoom: 15.5, duration: 800, pitch: S.d3 ? 55 : 0, bearing: 0 });
 }
 
 function prediction() {
@@ -332,72 +345,150 @@ function prediction() {
   return { plannedArr, plannedDep, liveDelay, stopsAway, e, key, arr: addMin(plannedArr, e.min), depT: addMin(plannedDep, e.min), platform: dep.platform };
 }
 
+const stName = () => (S.station?.name || 'Mering-St Afra').replace(' (Demo)', '');
+// Verständliche Meldung statt technischer Fehlertexte
+function humanError(e) {
+  const t = String(e || '');
+  if (/DB_CLIENT_ID|DB_API_KEY/.test(t)) return 'Bahn-Zugang nicht eingerichtet';
+  if (/Kontingent|429|503/.test(t)) return 'Bahn-Limit erreicht, Daten etwas älter';
+  if (/Failed to fetch|Load failed|NetworkError|network/i.test(t)) return 'Keine Internetverbindung';
+  return 'Bahn gerade nicht erreichbar';
+}
+
 function render() {
   const list = vis(), i = list.findIndex(d => d.tripId === S.sel), dep = list[i];
-  $('board').hidden = !S.board;
+  const peek = $('sPeek'), half = $('sHalf'), full = $('sFull');
+  if (S.loading && !S.deps.length) {
+    peek.innerHTML = `<div class="row top"><span class="badge skel">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="dir skel-t">Lade Abfahrten …</span></div>
+      <div class="times"><span class="big skel-t">––:––</span></div><div class="sub">Verbindung zur Bahn wird aufgebaut</div>`;
+    half.innerHTML = ''; full.innerHTML = ''; setSheet(S.sheet, true); return;
+  }
   if (!dep) {
     const loose = S.strict ? S.deps.filter(d => dirOf(d) === S.dir && !d.cancelled).length : 0;
-    $('tag').className = 'glass tag';
-    $('tag').innerHTML = `<div class="row top"><span class="dir">Keine Abfahrten Richtung ${DIRS[S.dir]}</span></div>
-      <div class="sub" style="margin-top:6px">${S.strict ? `Gefiltert: nur Züge ${RULE[S.dir]}. ` : ''}${S.deps.length ? `${S.deps.length} Abfahrten in den nächsten 4 Stunden insgesamt.` : 'Die Bahn liefert gerade keine Abfahrten.'}</div>
-      ${loose ? `<button class="navbtn" id="loose">${loose} weitere Züge Richtung ${DIRS[S.dir]} zeigen</button>` : ''}`;
-    $('board').hidden = true;
-    const lb = $('loose'); if (lb) lb.onclick = e => { e.stopPropagation(); S.strict = false; store.set('zr.strict', false); S.sel = pickDefault()?.tripId; selectTrip(S.sel, true); };
-    return;
+    peek.innerHTML = `<div class="row top"><span class="dir">Keine Abfahrten Richtung ${DIRS[S.dir]}</span></div>
+      <div class="sub" style="margin-top:6px">${S.strict ? `Gefiltert: nur Züge ${RULE[S.dir]}. ` : ''}${S.deps.length ? `${S.deps.length} Abfahrten in den nächsten 4 Stunden insgesamt.` : 'Die Bahn liefert gerade keine Abfahrten.'}</div>`;
+    half.innerHTML = loose ? `<button class="navbtn" id="loose">${loose} weitere Züge Richtung ${DIRS[S.dir]} zeigen</button>` : '';
+    full.innerHTML = renderDetails(null, null);
+    const lb = $('loose'); if (lb) lb.onclick = () => { S.strict = false; store.set('zr.strict', false); S.sel = pickDefault()?.tripId; selectTrip(S.sel, true); };
+    bindDetails(); setSheet(S.sheet, true); return;
   }
   const p = prediction(), walkMin = S.walk ? Math.ceil(remainS() / 60) : null;
   const dMin = dep.cancelled ? 0 : (p ? p.e.min : dep.delay ?? 0);
   const leave = p && walkMin != null ? addMin(p.depT, -walkMin - 1) : null;
-  $('tag').className = 'glass tag' + (S.board ? ' open' : '') + (S.nav ? ' navtag' : '');
-  const canNav = !!S.walk && (S.mode === 'car' || S.mode === 'bike' || S.mode === 'foot');
-  const eta = S.walk ? new Date(Date.now() + remainS() * 1000) : null;
-  $('tag').innerHTML = S.nav ? `
-  <div class="row top"><span class="navico">${MODES[S.mode][0]}</span><span class="dir">Zum Bahnhof</span>${S.follow ? '' : '<button class="pillbtn" id="recenter">Zentrieren</button>'}</div>
-  <div class="times"><span class="big">${fmt(eta)}</span><span class="chip">${Math.ceil(remainS() / 60)} min</span><span class="sub" style="margin-left:auto">${(remainM() / 1000).toFixed(1)} km</span></div>
-  <div class="sub">${p && leave ? `Zug ${dep.line} ab <b>${fmt(p.depT)}</b>${dep.delay >= 1 ? ` (+${Math.round(dep.delay)})` : ''}` : ''}</div>
-  <div id="prog"></div>
-  <button class="navbtn end" id="navend">Beenden</button>` : `
-  <div class="row top"><span class="badge">${dep.line}</span><span class="dir">→ ${dep.direction}</span><span class="plat">Gl. ${dep.platform}</span><span class="chev">${S.board ? '⌄' : '⌃'}</span></div>
-  <div class="times"><span class="big ${dep.cancelled ? 'late' : cls(dMin)}">${dep.cancelled ? 'fällt aus' : fmt(p?.depT || dep.actual || dep.planned)}</span>${dep.cancelled ? '' : `${same(p?.plannedDep || dep.planned, p?.depT || dep.actual || dep.planned) ? '' : `<s>${fmt(p?.plannedDep || dep.planned)}</s>`}<span class="chip ${cls(dMin)}">${Math.abs(dMin) < 0.5 ? 'pünktlich' : sgn(dMin) + ' min'}</span>`}</div>
-  <div class="sub">${leave ? `Spätestens los <b>${fmt(leave)}</b> · ${MODES[S.mode][0]} ${walkMin} min` : 'Weg wird berechnet …'}</div>
-  <div id="prog"></div>
-  ${canNav ? `<button class="navbtn" id="navstart">${MODES[S.mode][0]} Route starten</button>` : ''}`;
-  const ns = $('navstart'); if (ns) ns.onclick = e => { e.stopPropagation(); startNav(); };
-  const ne = $('navend'); if (ne) ne.onclick = e => { e.stopPropagation(); stopNav(); };
-  const rc = $('recenter'); if (rc) rc.onclick = e => { e.stopPropagation(); S.follow = true; render(); updateNav(); };
-  renderBoard(list, i, dep, p);
+  const depShown = p?.depT || dep.actual || dep.planned, depPlan = p?.plannedDep || dep.planned;
+  if (S.nav) {
+    const eta = S.walk ? new Date(Date.now() + remainS() * 1000) : null;
+    peek.innerHTML = `<div class="row top"><span class="navico">${MODES[S.mode][0]}</span><span class="dir">Zum Bahnhof</span>${S.follow ? '' : '<button class="pillbtn" id="recenter">Zentrieren</button>'}</div>
+      <div class="times"><span class="big">${fmt(eta)}</span><span class="chip">${Math.ceil(remainS() / 60)} min</span><span class="sub" style="margin-left:auto">${(remainM() / 1000).toFixed(1)} km</span></div>
+      <div class="sub">${p ? `Zug ${dep.line} ab <b>${fmt(p.depT)}</b> · Gl. ${dep.platform}` : ''}</div>`;
+    half.innerHTML = `<div id="prog"></div><button class="navbtn end" id="navend">Beenden</button>`;
+  } else {
+    peek.innerHTML = `<div class="row top"><span class="badge" data-livery="${livery(dep)}">${dep.line}</span><span class="dir">${dep.direction}</span><span class="plat">Gl. ${dep.platform}</span></div>
+      <div class="times"><span class="big ${dep.cancelled ? 'late' : cls(dMin)}">${dep.cancelled ? 'fällt aus' : fmt(depShown)}</span>${dep.cancelled ? '' : `${same(depPlan, depShown) ? '' : `<s>${fmt(depPlan)}</s>`}<span class="chip ${cls(dMin)}">${Math.abs(dMin) < 0.5 ? 'pünktlich' : sgn(dMin) + ' min'}</span>`}</div>
+      <div class="sub">${leave ? `Spätestens los <b>${fmt(leave)}</b> · ${MODES[S.mode][0]} ${walkMin} min` : 'Weg wird berechnet …'}</div>`;
+    half.innerHTML = `<div id="prog"></div>${S.walk ? `<button class="navbtn" id="navstart">${MODES[S.mode][0]} Route starten</button>` : ''}`;
+  }
+  full.innerHTML = S.nav ? renderDetails(dep, p) : renderList(list) + renderDetails(dep, p);
+  const on = (id, f) => { const b = $(id); if (b) b.onclick = e => { e.stopPropagation(); f(); }; };
+  on('navstart', startNav); on('navend', stopNav); on('recenter', () => { S.follow = true; render(); updateNav(); });
+  full.querySelectorAll('.brow').forEach(b => b.onclick = () => { setSheet('half'); selectTrip(b.dataset.id, true); });
+  bindDetails();
   fillProg();
-  requestAnimationFrame(() => document.documentElement.style.setProperty('--tagh', $('tag').offsetHeight + 'px'));
+  setSheet(S.sheet, true);
 }
 
-function renderBoard(list, i, dep, p) {
-  if (!S.board) return;
-  const rows = list.slice(0, 8).map(d => {
+function renderList(list) {
+  const rows = list.slice(0, 12).map(d => {
     const m = d.delay ?? 0, t = d.actual || d.planned;
     return `<button class="brow ${d.tripId === S.sel ? 'sel' : ''}" data-id="${d.tripId}">
       <span class="bt"><b class="${d.cancelled ? 'late' : cls(m)}">${d.cancelled ? '—' : fmt(t)}</b>${m >= 1 && !d.cancelled ? `<s>${fmt(d.planned)}</s>` : ''}</span>
-      <span class="badge sm">${d.line}</span><span class="bd">${d.cancelled ? 'fällt aus · ' : ''}${d.direction}</span><span class="bg">Gl. ${d.platform}</span>
+      <span class="badge sm" data-livery="${livery(d)}">${d.line}</span><span class="bd">${d.cancelled ? 'fällt aus · ' : ''}${d.direction}</span><span class="bg">Gl. ${d.platform}</span>
       ${m >= 1 && !d.cancelled ? `<span class="chip ${cls(m)}">+${Math.round(m)}</span>` : '<span class="chip ontime">•</span>'}</button>`;
   }).join('');
+  return `<div class="bh"><b>Nächste Verbindungen</b><span class="sub">Richtung ${DIRS[S.dir]}</span></div><div class="blist">${rows || '<div class="sub" style="padding:8px 4px">Keine weiteren Verbindungen.</div>'}</div>`;
+}
+
+function renderDetails(dep, p) {
   const kv = (k, v) => `<div><span>${k}</span><span>${v}</span></div>`;
-  const details = [
-    p && kv('Ankunft', same(p.plannedArr, p.arr) ? `<b>${fmt(p.arr)}</b>` : `${fmt(p.plannedArr)} → <b>${fmt(p.arr)}</b>`),
+  const rows = [
+    p && kv('Ankunft in ' + stName(), same(p.plannedArr, p.arr) ? `<b>${fmt(p.arr)}</b>` : `${fmt(p.plannedArr)} → <b>${fmt(p.arr)}</b>`),
     p && kv('Prognose', p.e.basis),
-    dep.trainNo && kv('Zug', `${dep.category || ''} ${dep.trainNo}`),
-    dep.plannedPlatform && dep.platform !== dep.plannedPlatform && kv('Gleiswechsel', `<span class="late">Gl. ${dep.platform} statt ${dep.plannedPlatform}</span>`),
-    (dep.previousStops?.length || dep.nextStops?.length) && kv('Verlauf', [...(dep.previousStops || []).slice(-2), '<b>Mering St Afra</b>', ...(dep.nextStops || []).slice(0, 3)].join(' › ')),
-    kv('Weg zum Bahnhof', `<button id="modebtn" class="pillbtn">${MODES[S.mode][0]} ${MODES[S.mode][1]} ⇄</button>`),
-    kv('Richtungsfilter', `<button id="strictbtn" class="pillbtn">${S.strict ? 'An · ' + RULE[S.dir] : 'Aus'} ⇄</button>`),
-    kv('Quelle', S.live ? 'DB Live' : 'Demo'),
+    dep?.trainNo && kv('Zug', `${dep.category || ''} ${dep.trainNo}`),
+    dep?.plannedPlatform && dep.platform !== dep.plannedPlatform && kv('Gleiswechsel', `<span class="late">Gl. ${dep.platform} statt ${dep.plannedPlatform}</span>`),
+    dep && (dep.previousStops?.length || dep.nextStops?.length) && kv('Verlauf', [...(dep.previousStops || []).slice(-2), `<b>${stName()}</b>`, ...(dep.nextStops || []).slice(0, 3)].join(' › ')),
+    !S.nav && kv('Weg zum Bahnhof', `<button id="modebtn" class="pillbtn">${MODES[S.mode][0]} ${MODES[S.mode][1]}</button>`),
+    !S.nav && kv('Richtungsfilter', `<span class="kvcol"><button id="strictbtn" class="pillbtn">${S.strict ? 'An' : 'Aus'}</button><small>${S.strict ? 'nur Züge ' + RULE[S.dir] : 'alle Züge'}</small></span>`),
+    kv('Daten', S.live ? `DB live${S.updated ? ` · ${S.updated.toLocaleTimeString('de-DE')}` : ''}` : 'Demo'),
+    S.limit && S.limit.used != null && kv('Bahn-Abfragen', `${S.limit.used} von ${S.limit.limit} pro Minute`),
+    liveError && kv('Technik', `<small class="tech">${liveError.replace(/</g, '&lt;')}</small>`),
   ].filter(Boolean).join('');
-  $('board').innerHTML = `<div class="bh"><b>Nächste Verbindungen</b><span class="sub">→ ${DIRS[S.dir]}</span></div><div class="blist">${rows || '<div class="sub" style="padding:8px 4px">Keine weiteren Verbindungen.</div>'}</div><div class="bd2">${details}</div>`;
-  $('board').querySelectorAll('.brow').forEach(b => b.onclick = e => { e.stopPropagation(); selectTrip(b.dataset.id, true); });
+  return `<div class="bd2">${rows}</div>`;
+}
+function bindDetails() {
   const sb = $('strictbtn'); if (sb) sb.onclick = e => { e.stopPropagation(); S.strict = !S.strict; store.set('zr.strict', S.strict); S.sel = vis().some(d => d.tripId === S.sel) ? S.sel : pickDefault()?.tripId; selectTrip(S.sel, false); };
   const m = $('modebtn'); if (m) m.onclick = e => { e.stopPropagation(); const k = Object.keys(MODES); S.mode = k[(k.indexOf(S.mode) + 1) % k.length]; store.set('zr.mode2', S.mode); loadWalk().then(render); };
 }
 
+// ---- Blatt mit drei Höhen (wie Apple Karten): klein · mittel · groß; ziehen oder tippen ----
+const SHEET_TOP = 64;
+function sheetHeights() {
+  const sh = $('sheet'), H = sh.offsetHeight, grab = $('grab').offsetHeight, pad = 14;
+  const peek = Math.min(H, grab + $('sPeek').offsetHeight + pad), half = Math.min(H, peek + $('sHalf').offsetHeight);
+  return { H, peek, half: Math.max(half, peek), full: H };
+}
+function setSheet(state, instant = false) {
+  if (S.nav && state === 'full') state = 'half';
+  S.sheet = state;
+  const sh = $('sheet'), h = sheetHeights(), vis = h[state];
+  sh.classList.toggle('isfull', state === 'full'); document.body.classList.toggle('sheetfull', state === 'full');
+  sh.style.transition = instant ? 'none' : '';
+  sh.style.transform = `translateY(${h.H - vis}px)`;
+  if (instant) { sh.offsetHeight; sh.style.transition = ''; }
+  S.sheetVis = vis;
+  document.documentElement.style.setProperty('--sheetvis', vis + 'px');
+  $('grab').firstElementChild.className = state;
+  setTimeout(scheduleLayout, instant ? 0 : 460);
+}
+(function sheetGestures() {
+  const sh = $('sheet');
+  let start = null;
+  const down = e => {
+    const inFull = e.target.closest('#sFull');
+    if (inFull && (S.sheet !== 'full' || $('sFull').scrollTop > 0)) return; // im großen Blatt zuerst scrollen
+    if (e.target.closest('button') && !e.target.closest('#grab')) return;
+    const m = /translateY\(([-\d.]+)px\)/.exec(sh.style.transform);
+    start = { y: e.clientY, t: performance.now(), base: m ? +m[1] : 0, moved: false };
+  };
+  const move = e => {
+    if (!start) return;
+    const dy = e.clientY - start.y;
+    if (!start.moved && Math.abs(dy) < 6) return;
+    start.moved = true; sh.style.transition = 'none';
+    const h = sheetHeights();
+    sh.style.transform = `translateY(${Math.min(h.H - 90, Math.max(0, start.base + dy))}px)`;
+  };
+  const up = e => {
+    if (!start) return;
+    const s0 = start; start = null; sh.style.transition = '';
+    const order = S.nav ? ['peek', 'half'] : ['peek', 'half', 'full'];
+    if (!s0.moved) { // Tippen: eine Stufe größer, ganz oben wieder kleiner
+      if (!e.target.closest('#grab') && !e.target.closest('#sPeek')) return;
+      const i = order.indexOf(S.sheet); setSheet(order[i === order.length - 1 ? i - 1 : i + 1]); return;
+    }
+    const h = sheetHeights(), y = /translateY\(([-\d.]+)px\)/.exec(sh.style.transform), vis = h.H - (y ? +y[1] : 0);
+    const v = (e.clientY - s0.y) / Math.max(1, performance.now() - s0.t); // px/ms, positiv = nach unten
+    let target = order.reduce((a, b) => (Math.abs(h[b] - vis) < Math.abs(h[a] - vis) ? b : a));
+    if (Math.abs(v) > 0.45) { const i = order.indexOf(S.sheet); target = order[Math.max(0, Math.min(order.length - 1, i + (v < 0 ? 1 : -1)))]; }
+    setSheet(target);
+  };
+  sh.addEventListener('pointerdown', down);
+  addEventListener('pointermove', move, { passive: true });
+  addEventListener('pointerup', up); addEventListener('pointercancel', () => { if (start) { start = null; setSheet(S.sheet); } });
+  addEventListener('resize', () => setSheet(S.sheet, true));
+})();
+
 function bar(icon, left, right, frac, tone, ticks = []) {
-  const px = Math.max(240, ($('tag').clientWidth || 360) - 32), pos = f => `calc(10px + (100% - 20px) * ${f.toFixed(4)})`;
+  const px = Math.max(240, ($('sheet').clientWidth || 360) - 32), pos = f => `calc(10px + (100% - 20px) * ${f.toFixed(4)})`;
   const dot = (f, cls) => `<b class="tk ${cls}" style="left:${pos(f)}"></b>`;
   const dots = ticks.length || frac != null ? [dot(0, 'start p'), ...ticks.map(t => dot(t.f, t.f <= frac ? 'p' : '')), dot(1, 'end' + (frac >= 1 ? ' p' : ''))].join('') : '';
   let last = -99;
@@ -420,17 +511,16 @@ function fillProg() {
     const dep = S.tr.dep, st = S.tr.raw.start, name = st?.name || startName(dep) || 'Start';
     const tStart = st?.dep || S.tr.stops[0]?.dep || S.tr.stops[0]?.arr;
     const f = timeProgress(tStart, p.arr, now);
-    const arrTxt = `🚉 <b>${fmt(p.arr)}</b>${now < p.arr ? ` · ${minutesUntil(p.arr, now)} min` : ' · da'}`;
-    parts.push(bar("🚆", name, arrTxt, f ?? 0, cls(p.e.min), tStart ? trainStops(dep, tStart, p.arr) : []));
+    const arrTxt = `${ICON.station} <b>${fmt(p.arr)}</b>${now < p.arr ? ` · ${minutesUntil(p.arr, now)} min` : ' · da'}`;
+    parts.push(bar(ICON.train, name, arrTxt, f ?? 0, cls(p.e.min), tStart ? trainStops(dep, tStart, p.arr) : []));
   }
   if (S.me && S.walk) {
     const eta = new Date(+now + remainS() * 1000), f = distProgress(S.trackTotal, remainM());
     const buf = p ? buffer(p.depT, eta) : null;
     const bufTxt = buf == null ? '' : buf >= 0 ? ` · <b class="ontime">+${buf}</b>` : ` · <b class="late">${buf}</b>`;
-    parts.push(bar('📍', 'Du', `🚉 <b>${fmt(eta)}</b> · ${Math.ceil(remainS() / 60)} min${bufTxt}`, f, buf != null && buf < 0 ? 'late' : 'me'));
-  } else parts.push(`<button class="gpsbtn" id="gpsbtn">📍 Live-Standort einschalten</button>`);
+    parts.push(bar(ICON.me, 'Du', `${ICON.station} <b>${fmt(eta)}</b> · ${Math.ceil(remainS() / 60)} min${bufTxt}`, f, buf != null && buf < 0 ? 'late' : 'me'));
+  }
   box.innerHTML = parts.join('');
-  const g = $('gpsbtn'); if (g) g.onclick = e => { e.stopPropagation(); startTracking(); };
 }
 
 // ---- Live-Standort ----
@@ -461,7 +551,7 @@ function updateNav(pos, r) {
   const brg = r && r.off < 60 ? r.bearing : toStation;
   // Ausschnitt: du + Zug + Bahnhof immer sichtbar, Neigung je nach Zoom (nah = steil geneigt, weit = flacher)
   const b = new maplibregl.LngLatBounds(S.me, S.me); b.extend(S.station.lonlat); if (S.trainPos) b.extend(S.trainPos);
-  const pad = { top: 110, bottom: ($('tag').offsetHeight || 220) + 36, left: 56, right: 76 };
+  const pad = { top: 110, bottom: S.sheetVis + 36, left: 56, right: 76 };
   const pitchFor = z => Math.max(20, Math.min(62, 20 + (z - 10) * 6.5));
   let cam = map.cameraForBounds(b, { padding: pad, bearing: brg, pitch: 0, maxZoom: 17.2 });
   if (!cam) { S.camTarget = { center: S.me, zoom: 15, bearing: brg, pitch: 45 }; return; }
@@ -497,7 +587,7 @@ async function startNav() {
   S.nav = true; S.follow = true; document.body.classList.add('nav');
   if (S.watch == null) startTracking();
   try { S.wake = await navigator.wakeLock?.request('screen'); } catch {}
-  S.board = false; render();
+  S.sheet = 'half'; render();
   if (S.me) { await loadWalk(); updateNav(); } // sonst übernimmt der erste GPS-Fix
 }
 function stopNav() {
@@ -539,8 +629,7 @@ document.querySelectorAll('#dirctl button').forEach(b => b.onclick = async () =>
   S.sel = pickDefault()?.tripId; await selectTrip(S.sel, true);
 });
 updateDirUI();
-$('tag').onclick = () => { S.board = !S.board; render(); };
-map.on('click', () => { if (S.board) { S.board = false; render(); } });
+map.on('click', () => { if (S.sheet === 'full') setSheet('half'); });
 
 const TRAIN_SVG = `<svg viewBox="0 0 28 84" width="28" height="84" aria-hidden="true"><defs><filter id="ts" x="-40%" y="-20%" width="180%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="2.2" flood-opacity=".38"/></filter></defs>
 <g filter="url(#ts)"><rect x="4" y="2" width="20" height="80" rx="10" fill="#fff" stroke="#c7c7cc" stroke-width="1"/>
@@ -590,14 +679,15 @@ $('refresh').onclick = refresh;
 $('fit').onclick = () => { S.fitFull = !S.fitFull; $('fit').title = S.fitFull ? 'Näher heran' : 'Ganze Strecke'; fitAll(); };
 
 (async () => {
+  render(); // Ladezustand sofort zeigen
   await loadHome();
-  await refresh();
-  await loadWalk(); placeBase();
+  await Promise.all([refresh(), loadWalk()]); placeBase();
   if (!S.sel || !S.deps.find(d => d.tripId === S.sel) || true) { const d = pickDefault(); if (d && d.tripId !== S.sel) await selectTrip(d.tripId, false); }
   render(); fitAll();
 })();
 if (S.track) navigator.permissions?.query({ name: 'geolocation' }).then(r => { if (r.state === 'granted') startTracking(); }).catch(() => {});
 if (location.hash === '#debug') Object.assign(window, { __map: map, __S: S, __t3d: train3d, __layout: layout });
 setInterval(tick, 1000);
-setInterval(() => { if (!document.hidden) refresh().then(logObservation); }, 30000);
+// alle 10 s: der Worker teilt die 60 Bahn-Abfragen pro Minute auf und liefert sonst den letzten Stand
+setInterval(() => { if (!document.hidden) refresh().then(logObservation); }, 10000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });

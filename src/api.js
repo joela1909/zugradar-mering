@@ -7,7 +7,7 @@ const j = async (u, o) => {
 const D = s => (s ? new Date(s) : null);
 const minutes = s => (s == null ? null : s / 60);
 
-export const FALLBACK_STATION = { id: null, name: 'Mering St Afra', lonlat: [10.971202, 48.274282] };
+export const FALLBACK_STATION = { id: null, name: 'Mering-St Afra', lonlat: [10.971202, 48.274282] };
 
 export async function findStation() {
   const r = await j(`${BASE}/locations?query=${encodeURIComponent('Mering St Afra')}&results=5&v=3`, { cache: 'no-store' });
@@ -52,7 +52,7 @@ export async function route(mode, from, to) {
 
 /* ---------- Demo-Daten (offline, grob vereinfachte Geometrie) ---------- */
 export function demo(now = new Date()) {
-  const station = { ...FALLBACK_STATION, name: 'Mering St Afra (Demo)' };
+  const station = { ...FALLBACK_STATION };
   const names = [['Augsburg Hbf', [10.8855, 48.3654]], ['Augsburg-Hochzoll', [10.9330, 48.3430]], [station.name, station.lonlat],
     ['Mering', [10.9830, 48.2670]], ['Althegnenberg', [11.1040, 48.2160]], ['Maisach', [11.2300, 48.2060]], ['München Hbf', [11.5600, 48.1400]]];
   const polyline = [];
@@ -95,3 +95,6 @@ export async function rail(a, b) {
     return null;
   }
 }
+
+/** Auslastung des Bahn-Kontingents (Anfragen der letzten Minute) */
+export async function limit() { return j(`${BASE}/limit`, { cache: 'no-store' }); }

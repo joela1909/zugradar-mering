@@ -23,3 +23,7 @@ Bahnhofskoordinaten stammen aus `stations.json` (erzeugt mit `node scripts/build
 ## Gleisgeometrie
 
 `/api/rail?from=<EVA>&to=<EVA>` holt die Gleise zwischen zwei Halten aus OpenStreetMap (Overpass, `railway=rail`, ODbL), berechnet den kürzesten Weg (`rail.js`) und speichert ihn 30 Tage im Edge-Cache; der Browser merkt sich jeden Abschnitt dauerhaft. Die Zugposition läuft damit entlang der echten Gleise.
+
+## Bahn-Kontingent
+
+Die DB-Timetables-API erlaubt 60 Anfragen pro Minute. Ein Durable Object (`RateLimiter` in `worker.js`, Fenster in `limiter.js`) zählt alle Bahn-Anfragen aller Geräte in einem gleitenden 60-Sekunden-Fenster und gibt genau so viele frei (`DB_RATE_LIMIT`, Standard 60). Ist das Kontingent erschöpft, liefert der Worker die zuletzt gespeicherte Antwort. Echtzeitdaten werden frühestens alle 10 s neu geholt, die Halte nahe Mering-St Afra zuerst. `/api/limit` zeigt die aktuelle Auslastung.

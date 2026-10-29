@@ -1,4 +1,5 @@
 import stations from './stations.json';
+import { SlidingWindow } from './limiter.js';
 import { buildGraph, shortestPath, thin, overpassQuery } from './rail.js';
 import { trackWindow, hourShifts, parseTime, parseTimetable, parseStations, merge, toDepartures, toStopover, planPath, addHours, tripKey, splitPath } from './iris.js';
 
@@ -20,19 +21,66 @@ async function cached(key, ttl, fn) {
   return text;
 }
 
-async function db(env, path, ttl) {
-  if (!env.DB_CLIENT_ID || !env.DB_API_KEY) throw new ApiError('DB_CLIENT_ID / DB_API_KEY fehlen (Worker-Secrets)', 500);
-  return cached('db2:' + path, ttl, async () => {
-    const r = await fetch(BASE + path, { headers: { 'DB-Client-Id': env.DB_CLIENT_ID, 'DB-Api-Key': env.DB_API_KEY, accept: 'application/xml', 'user-agent': UA } });
-    if (r.status === 404) return '<timetable/>'; // z. B. Stunde ohne Daten
-    if (!r.ok) throw new ApiError(`Bahn-API ${r.status} ${path.split('/')[1]} ${(await r.text()).slice(0, 80)}`);
-    return r.text();
-  });
+// ---- Bahn-Kontingent: genau DB_RATE_LIMIT (Standard 60) Anfragen pro gleitender Minute, für alle Geräte zusammen ----
+// Zentraler Zähler als Durable Object; jede Worker-Anfrage holt sich Freigaben in kleinen Paketen und gibt Reste zurück.
+export class RateLimiter {
+  constructor(state, env) { this.w = new SlidingWindow(Number(env.DB_RATE_LIMIT) || 60, 60000); }
+  async fetch(req) {
+    const u = new URL(req.url), n = Number(u.searchParams.get('n')) || 0;
+    if (u.pathname === '/take') return Response.json({ k: this.w.take(n) });
+    if (u.pathname === '/give') { this.w.give(n); return Response.json({ ok: true }); }
+    if (u.pathname === '/pause') { this.w.pause(n); return Response.json({ ok: true }); }
+    return Response.json({ used: this.w.used(), limit: this.w.limit, nextFreeMs: this.w.nextFree() });
+  }
+}
+function makeBudget(env) {
+  const stub = env.LIMITER ? env.LIMITER.get(env.LIMITER.idFromName('db-timetables')) : null;
+  let pool = 0, empty = false, chain = Promise.resolve();
+  const call = async (path, n) => (await stub.fetch(`https://limiter/${path}?n=${n}`)).json();
+  return {
+    // eine Freigabe holen (Anfragen werden der Reihe nach bedient, damit wichtige zuerst drankommen)
+    take() {
+      if (!stub) return Promise.resolve(true);
+      return (chain = chain.then(async () => {
+        if (pool > 0) { pool--; return true; }
+        if (empty) return false;
+        const { k } = await call('take', 6).catch(() => ({ k: 0 }));
+        if (k > 0) { pool = k - 1; return true; }
+        empty = true; return false;
+      }));
+    },
+    async release() { if (stub && pool > 0) { const n = pool; pool = 0; await call('give', n).catch(() => {}); } },
+    async pause(ms) { if (stub) await call('pause', ms).catch(() => {}); },
+    async stats() { return stub ? call('stats', 0) : { used: null, limit: Number(env.DB_RATE_LIMIT) || 60 }; },
+  };
 }
 
-const station = async (env, pattern) => parseStations(await db(env, '/station/' + encodeURIComponent(pattern), 3600));
-const plan = async (env, eva, date) => parseTimetable(await db(env, `/plan/${eva}/${planPath(date)}`, 300));
-const changes = async (env, eva) => parseTimetable(await db(env, `/fchg/${eva}`, 30));
+// Bahn-Abruf mit Zwischenspeicher: frisch genug → aus dem Speicher; sonst, falls Kontingent frei, neu laden;
+// ist das Kontingent erschöpft, die zuletzt gespeicherte Antwort liefern (bis zu einem Tag alt).
+async function db(env, path, fresh) {
+  if (!env.DB_CLIENT_ID || !env.DB_API_KEY) throw new ApiError('DB_CLIENT_ID / DB_API_KEY fehlen (Worker-Secrets)', 500);
+  const cache = caches.default, key = new Request('https://cache.local/db3:' + encodeURIComponent(path));
+  const hit = await cache.match(key);
+  const age = hit ? (Date.now() - Number(hit.headers.get('x-at') || 0)) / 1000 : Infinity;
+  if (hit && age < fresh) return hit.text();
+  if (!(await env.budget.take())) {
+    if (hit) return hit.text();
+    throw new ApiError('Bahn-Kontingent für diese Minute ausgeschöpft', 503);
+  }
+  const r = await fetch(BASE + path, { headers: { 'DB-Client-Id': env.DB_CLIENT_ID, 'DB-Api-Key': env.DB_API_KEY, accept: 'application/xml', 'user-agent': UA } });
+  if (r.status === 429) { await env.budget.pause(15000); if (hit) return hit.text(); throw new ApiError('Bahn-Kontingent erreicht', 503); }
+  let text;
+  if (r.status === 404) text = '<timetable/>'; // z. B. Stunde ohne Daten
+  else if (!r.ok) { if (hit) return hit.text(); throw new ApiError(`Bahn-API ${r.status} ${path.split('/')[1]} ${(await r.text()).slice(0, 80)}`); }
+  else text = await r.text();
+  await cache.put(key, new Response(text, { headers: { 'cache-control': 'max-age=86400', 'x-at': String(Date.now()) } }));
+  return text;
+}
+
+// Frische: Bahnhöfe 1 Tag, Fahrpläne 10 min, Echtzeit-Änderungen so oft das Kontingent es erlaubt (frühestens alle 10 s)
+const station = async (env, pattern) => parseStations(await db(env, '/station/' + encodeURIComponent(pattern), 86400));
+const plan = async (env, eva, date) => parseTimetable(await db(env, `/plan/${eva}/${planPath(date)}`, 600));
+const changes = async (env, eva) => parseTimetable(await db(env, `/fchg/${eva}`, 10).catch(() => '<timetable/>'));
 
 
 // Koordinaten aus den Stationsdaten der Bahn (EVA bzw. Name), sonst Ortssuche
@@ -148,8 +196,11 @@ async function trip(env, tripId) {
     return null;
   };
   const n = win.before.length;
-  const beforeStops = await Promise.all(win.before.map((name, i) => find(name, hourShifts(n - i, -1, base))));
-  const afterStops = await Promise.all(win.after.map((name, i) => find(name, hourShifts(i + 1, 1, base))));
+  // Reihenfolge nach Nähe zum Bahnhof: bei knappem Kontingent bekommen die nahen Halte die frischen Daten
+  const jobs = [...win.before.map((name, i) => ({ side: 'b', i, d: n - i, name, sh: hourShifts(n - i, -1, base) })), ...win.after.map((name, i) => ({ side: 'a', i, d: i + 1, name, sh: hourShifts(i + 1, 1, base) }))].sort((x, y) => x.d - y.d);
+  const done = await Promise.all(jobs.map(j => find(j.name, j.sh).catch(() => null).then(r => ({ ...j, r }))));
+  const beforeStops = win.before.map((_, i) => done.find(j => j.side === 'b' && j.i === i).r);
+  const afterStops = win.after.map((_, i) => done.find(j => j.side === 'a' && j.i === i).r);
   const here1 = toStopover(ownName, eva, await locate(ownName, eva), own);
   const stopovers = [...beforeStops, here1, ...afterStops].filter(Boolean);
   const start = stopovers.find(x => x.stop.name === win.start) || null;
@@ -157,20 +208,23 @@ async function trip(env, tripId) {
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env0, ctx) {
     const url = new URL(req.url);
-    if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(req);
+    if (!url.pathname.startsWith('/api/')) return env0.ASSETS.fetch(req);
+    const budget = makeBudget(env0), env = { ...env0, budget };
     const path = url.pathname.slice(4), q = url.searchParams;
     try {
       let m;
+      if (path === '/limit') return json(await budget.stats(), 200, 0);
       if (path === '/rail') return json(await railSegment(q.get('from') || '', q.get('to') || ''), 200, 86400);
       if (path === '/geocode') return json(await locateAddress(q.get('q') || ''), 200, 86400);
-      if (path === '/locations') return json(await locations(env, q), 200, 60);
-      if ((m = path.match(/^\/stops\/([^/]+)\/departures$/))) return json(await departures(env, decodeURIComponent(m[1]), q));
-      if ((m = path.match(/^\/trips\/(.+)$/))) return json(await trip(env, decodeURIComponent(m[1])));
+      if (path === '/locations') { const r = await locations(env, q); ctx?.waitUntil?.(budget.release()); return json(r, 200, 60); }
+      if ((m = path.match(/^\/stops\/([^/]+)\/departures$/))) { const r = await departures(env, decodeURIComponent(m[1]), q); ctx?.waitUntil?.(budget.release()); return json(r, 200, 5); }
+      if ((m = path.match(/^\/trips\/(.+)$/))) { const r = await trip(env, decodeURIComponent(m[1])); ctx?.waitUntil?.(budget.release()); return json(r, 200, 5); }
       return json({ error: 'unbekannter Pfad' }, 404);
     } catch (e) {
       console.error(path, e?.stack);
+      ctx?.waitUntil?.(budget.release());
       return json({ error: e instanceof ApiError ? e.message : 'Fehler', detail: String(e?.message || e).slice(0, 160) }, e?.status || 502, 0);
     }
   },
