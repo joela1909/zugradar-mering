@@ -188,11 +188,7 @@ function layout() {
     .forEach(e => { const b = e.getBoundingClientRect(); placed.add({ x1: b.left - 4, y1: b.top - 4, x2: b.right + 4, y2: b.bottom + 4 }); });
   const onScreen = r => r.x1 >= 6 && r.y1 >= 6 && r.x2 <= innerWidth - 6 && r.y2 <= innerHeight - 6;
   const items = labels.filter(l => l.marker.getElement().isConnected && !(l.trainLabel && tb)).sort((a, b) => a.prio - b.prio);
-  // aufräumen: höchstens 3 Halte-Labels (wichtigste zuerst); den nächsten Halt zeigt schon das Zug-Label
-  const next = nextStop();
-  let stopsShown = 0;
   for (const it of items) {
-    if (it.stop && (stopsShown >= 3 || (next && it.name === next.name))) { it.marker.getElement().style.display = 'none'; continue; }
 
     const el = it.marker.getElement(); el.style.display = '';
     const { x, y } = map.project(it.ll), w = el.offsetWidth + 6, h = el.offsetHeight + 6, gx = w / 2 + 3, gy = h / 2 + 3;
@@ -203,7 +199,6 @@ function layout() {
     if (!pick && it.essential) pick = cands.find(o => { const r = at(o); return onScreen(r) && !placed.hits(r); }) || cands.find(o => onScreen(at(o)));
     if (!pick) { if (!it.essential) { el.style.display = 'none'; continue; } pick = cands[0]; }
     it.marker.setOffset(pick); placed.add(at(pick));
-    if (it.stop) stopsShown++;
   }
 }
 // Umriss des 3D-Zugs auf dem Bildschirm (vom Modell bei jedem Bild gemeldet), mit etwas Luft
@@ -212,17 +207,23 @@ function trainBox() {
   return { x1: b.x1 - 3, y1: b.y1 - 3, x2: b.x2 + 3, y2: b.y2 + 3 };
 }
 // Zug-Label schwebt mittig über dem Zug, nie auf ihm (bei jedem Bild nachgeführt)
-const LABEL_GAP = 9;
+const LABEL_GAP = 18; // Platz für den Stiel
+// Normal über dem Zug; nur wenn dort Bedienelemente oder der Bildschirmrand sind, darunter (Stiel zeigt dann nach oben)
 function trainLabelRect() {
   const e = S.trainLabel?.getElement(), b = trainBox(); if (!e || !b) return null;
   const w = e.offsetWidth, h = e.offsetHeight, cx = (b.x1 + b.x2) / 2;
-  return { x1: cx - w / 2, y1: b.y1 - LABEL_GAP - h, x2: cx + w / 2, y2: b.y1 - LABEL_GAP };
+  const above = { x1: cx - w / 2, y1: b.y1 - LABEL_GAP - h, x2: cx + w / 2, y2: b.y1 - LABEL_GAP };
+  const ui = [$('dirctl'), $('status'), document.querySelector('.fabs')].filter(x => x && x.getClientRects().length).map(x => x.getBoundingClientRect());
+  const blocked = above.y1 < 6 || ui.some(u => !(above.x2 <= u.left || above.x1 >= u.right || above.y2 <= u.top || above.y1 >= u.bottom));
+  e.classList.toggle('below', blocked);
+  return blocked ? { x1: above.x1, y1: b.y2 + LABEL_GAP, x2: above.x2, y2: b.y2 + LABEL_GAP + h } : above;
 }
 function placeTrainLabel() {
   const r = trainLabelRect(); if (!r || !S.trainPos) return;
   const p = map.project(S.trainPos);
   S.trainLabel.getElement().style.display = '';
   S.trainLabel.setOffset([(r.x1 + r.x2) / 2 - p.x, (r.y1 + r.y2) / 2 - p.y]);
+  S.trainLabel.getElement().style.setProperty('--stem', LABEL_GAP - 1 + 'px');
 }
 map.on('render', placeTrainLabel);
 // höchstens alle 500 ms neu anordnen (Kamerafahrten lösen sonst bei jedem Schritt ein Layout aus)
@@ -322,12 +323,18 @@ function pickDefault() {
   return ok.find(d => addMin(d.actual || d.planned, -walkMin) > now) || ok.find(d => addMin(d.actual || d.planned, 1) > now) || list[0];
 }
 
-const stopHtml = s => { const d = s.arrDelay ?? s.depDelay ?? 0; return `${shortName(s.name)}<br><i class="${cls(d)}">${fmt(s.arr || s.dep)}${d >= 1 ? ' +' + Math.round(d) : ''}</i>`; };
-// nächster Halt des Zugs (steht im Zug-Label)
-function nextStop() {
-  const now = Date.now(), st = S.tr?.raw.stopovers || [];
-  return st.find(s => +(s.arr || s.dep) > now) || null;
-}
+// Halte-Labels kompakt: nur die Zeit, der Name erst beim Hineinzoomen
+const NAME_ZOOM = 13;
+const stopHtml = s => {
+  const d = s.arrDelay ?? s.depDelay ?? 0, t = `<i class="${cls(d)}">${fmt(s.arr || s.dep)}${d >= 1 ? ' +' + Math.round(d) : ''}</i>`;
+  return map.getZoom() >= NAME_ZOOM ? `${shortName(s.name)} ${t}` : t;
+};
+let namesShown = null;
+map.on('zoomend', () => {
+  const show = map.getZoom() >= NAME_ZOOM; if (show === namesShown) return; namesShown = show;
+  S.stopLabels.forEach(({ i, marker }) => { const s = S.tr?.raw.stopovers[i]; if (s) marker.getElement().innerHTML = stopHtml(s); });
+  scheduleLayout();
+});
 const railColorFor = t => { const worst = Math.max(0, ...t.stopovers.map(s => s.arrDelay ?? s.depDelay ?? 0)); return worst >= 5 ? '#ff3b30' : worst >= 1 ? '#ff9f0a' : '#34c759'; };
 
 async function selectTrip(id, fit, soft = false) {
@@ -368,7 +375,7 @@ async function selectTrip(id, fit, soft = false) {
     S.stopLabels = [];
     t.stopovers.forEach((s, i) => {
       if (i === stopIdx || dist(s.lonlat, S.station.lonlat) < 900) return;
-      const marker = reg(mk(el('lbl', stopHtml(s)), s.lonlat), s.lonlat, 5 + Math.abs(i - stopIdx), { stop: true, name: s.name });
+      const marker = reg(mk(el('lbl stop', stopHtml(s)), s.lonlat), s.lonlat, 5 + Math.abs(i - stopIdx), { stop: true });
       S.markers.push(marker); S.stopLabels.push({ i, marker });
       S.markers.push(mk(el('dot', ''), s.lonlat)); dots.push(s.lonlat);
     });
@@ -786,8 +793,9 @@ function tick() {
   const live = S.live && S.tr.raw.currentLocation && p.state === 'fährt';
   const pos = live ? S.tr.raw.currentLocation : p.pos;
   S.trainPos = pos;
-  const d = S.tr.dep.delay ?? 0, ns = nextStop();
-  const html = `${S.tr.dep.line}${d >= 1 ? ` <b>+${Math.round(d)}</b>` : ''}${ns ? `<small>→ ${shortName(ns.name)} ${fmt(ns.arr || ns.dep)}</small>` : ''}`;
+  // kurz halten: Betreiberkürzel weglassen (die Farbe zeigt den Betreiber), „ARV RE89“ → „RE89“
+  const d = S.tr.dep.delay ?? 0, line = S.tr.dep.line.replace(/^[A-Za-z]{2,4}\s+(?=[A-Z]{1,3}\s?\d)/, '');
+  const html = `${line}${d >= 1 ? ` <b>+${Math.round(d)}</b>` : ''}`;
   if (!S.trainMarker) S.trainMarker = new maplibregl.Marker({ element: el('trainmodel', TRAIN_SVG), anchor: 'center', rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat(pos).addTo(map);
   S.trainMarker.setLngLat(pos).setRotation(p.bearing || 0);
   const lv = livery(S.tr.dep); train3d.setLivery(lv);
