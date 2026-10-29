@@ -65,3 +65,14 @@ export function livery(dep) {
   if (DB_CATEGORIES.test(cat) || (!cat && /^(RE|RB|IRE|IC|ICE|S)\b/i.test(name))) return 'db';
   return 'other';
 }
+
+/** Abfahrten zur exakt gleichen Planzeit in dieselbe Richtung fahren gekoppelt (z. B. RE80 + RE89):
+ *  ein Eintrag je Zug, die weiteren Zugteile stehen in .coupled */
+export function couple(list) {
+  const out = [], by = new Map();
+  for (const d of list) {
+    const k = +d.planned + '|' + dirOf(d), g = by.get(k);
+    if (g) g.coupled.push(d); else { const c = { ...d, coupled: [] }; by.set(k, c); out.push(c); }
+  }
+  return out;
+}

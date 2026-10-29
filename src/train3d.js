@@ -59,19 +59,19 @@ function deckCar(y0, L, g) {
   for (const t of [.29, .71]) doors(at(t), .55, g);
   bogies(y0, L, g);
 }
-// Endwagen mit runder Desiro-Nase; dir = 1 vorn (Nase vorn), −1 hinten (Nase hinten)
+// Endwagen mit runder Desiro-Nase; dir = 1 vorn (Nase vorn), −1 hinten (Nase hinten).
+// short: kurzer Wagen für die Übersicht mit Nase an beiden Enden (weniger Fenster statt gestaucht)
 function endCar(yFace, L, dir, g, short = false) {
-  const nose = 4.8, body = L - nose;
+  const nose = 4.8, body = L - nose * (short ? 2 : 1);
   const yb = dir > 0 ? yFace - nose : yFace + L;                                       // vorderes Ende des Wagenkastens
   const at = t => (dir > 0 ? yb - t * body : yb - (1 - t) * body);                     // t = 0 an der Nase
   g.add(hull(body, M.red, yb, W, .95, 4.25, .75));
   g.add(box(W - 1.3, body - 1, .2, M.roof, 0, yb - body / 2, 4.15));
   wave(yb, body, lerp([[0, 1.95], [.15, 1.35], [.3, 1.4], [.5, 1.8], [.62, 2.0], [.72, 1.8], [.85, 2.1], [1, 2.4]]),
     lerp([[0, .15], [.1, .62], [.3, .65], [.5, .85], [.65, .68], [.85, .6], [1, .25]]), g, dir < 0);
-  // kurzer Wagen (für die Übersicht): weniger Fenster statt gestauchter
-  for (const t of short ? [.1, .5, .9] : [.07, .5, .82, .93]) win(at(t), 1.9, 2.05, .8, g);
+  for (const t of short ? [.17, .83] : [.07, .5, .82, .93]) win(at(t), 1.9, 2.05, .8, g);
   if (!short) win(at(.33), .8, 2.15, .6, g);                                           // kleines Fenster (Rollstuhlplatz)
-  for (const t of short ? [.3, .7] : [.2, .68]) doors(at(t), .95, g);
+  for (const t of short ? [.5] : [.2, .68]) doors(at(t), .95, g);
   bogies(yb, body, g);
   // Nase: gewölbtes Seitenprofil (Dach läuft in weitem Bogen zur Front), in der Draufsicht durch schmalere Schichten gerundet
   const curve = (k, dz = 0) => {
@@ -89,12 +89,13 @@ function endCar(yFace, L, dir, g, short = false) {
   tip.add(box(1.2, .5, .35, M.skirt, 0, 4.6, .2));                                     // Kupplung
   if (dir < 0) tip.rotation.z = Math.PI;
   tip.position.y = dir > 0 ? yb : yb - body; g.add(tip);
+  if (short) { const back = tip.clone(); back.rotation.z = Math.PI; back.position.y = yb - body; g.add(back); } // zweite runde Nase hinten
 }
 
-// Zug aus vier Wagen (Endwagen, 2 Doppelstockwagen, Endwagen); jeder Wagen mit seinem vorderen Ende bei y = 0 gebaut.
-// setCars(n) zeigt 4, 3 (1., 2., 4.), 2 (1. und 4.) oder 1 Wagen (kurzer Endwagen) und rückt sie mittig zusammen – beim Herauszoomen kürzer statt gestaucht.
-const END_L = 26.4, MID_L = 25.4, SHORT_L = 17, GAP = .5;
-export function buildTrain() {
+// Eine Zugeinheit aus vier Wagen (Endwagen, 2 Doppelstockwagen, Endwagen); jeder Wagen mit seinem vorderen Ende bei y = 0 gebaut.
+// setCars(n) zeigt 4, 3 (1., 2., 4.) oder 1 Wagen (kurzer Wagen mit zwei Nasen) und rückt sie mittig zusammen – beim Herauszoomen kürzer statt gestaucht.
+const END_L = 26.4, MID_L = 25.4, SHORT_L = 20, GAP = .5, COUPLER = 1.2;
+function buildUnit() {
   const mk = f => { const c = new THREE.Group(); f(c); return c; };
   const cars = [
     { g: mk(c => endCar(0, END_L, 1, c)), L: END_L },
@@ -103,17 +104,30 @@ export function buildTrain() {
     { g: mk(c => deckCar(0, MID_L, c)), L: MID_L },
     { g: mk(c => endCar(-END_L, END_L, -1, c)), L: END_L },
   ];
-  const train = new THREE.Group(); cars.forEach(c => train.add(c.g));
-  const SHOW = { 4: [0, 2, 3, 4], 3: [0, 2, 4], 2: [0, 4], 1: [1] };
-  train.setCars = n => {
-    if (train.cars === n) return; train.cars = n;
+  const unit = new THREE.Group(); cars.forEach(c => unit.add(c.g));
+  const SHOW = { 4: [0, 2, 3, 4], 3: [0, 2, 4], 1: [1] };
+  unit.setCars = n => {
+    if (unit.cars === n) return; unit.cars = n;
     const vis = SHOW[n].map(i => cars[i]), total = vis.reduce((s, c) => s + c.L, 0) + GAP * (vis.length - 1);
     let y = total / 2;
     cars.forEach(c => { c.g.visible = vis.includes(c); });
     for (const c of vis) { c.g.position.y = y; y -= c.L + GAP; }
-    train.len = total;
+    unit.len = total;
   };
-  train.setCars(4);
+  return unit;
+}
+// Zug: eine Einheit, oder zwei gekoppelte Einheiten hintereinander (Nase an Nase)
+export function buildTrain() {
+  const a = buildUnit(), b = buildUnit(), train = new THREE.Group();
+  train.add(a, b);
+  const arrange = () => {
+    if (!train.coupled) { a.position.y = 0; b.visible = false; train.len = a.len; return; }
+    b.visible = true; train.len = a.len + COUPLER + b.len;
+    a.position.y = train.len / 2 - a.len / 2; b.position.y = -train.len / 2 + b.len / 2;
+  };
+  train.setCars = n => { if (train.cars === n) return; train.cars = n; a.setCars(n); b.setCars(n); arrange(); };
+  train.setCoupled = c => { if (train.coupled === c) return; train.coupled = c; arrange(); };
+  train.setCars(4); train.setCoupled(false);
   return train;
 }
 
@@ -130,7 +144,7 @@ export function createTrainLayer(maplibregl) {
       this.camera = new THREE.Camera(); this.scene = new THREE.Scene();
       this.scene.add(new THREE.AmbientLight(0xffffff, 2.6));
       const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(-.4, -.7, 1).normalize(); this.scene.add(sun);
-      this.train = buildTrain(); this.scene.add(this.train);
+      this.train = buildTrain(); this.train.setCoupled(!!state.coupled); this.scene.add(this.train);
       this.renderer = new THREE.WebGLRenderer({ canvas: map.getCanvas(), context: gl, antialias: true });
       this.renderer.autoClear = false;
     },
@@ -163,6 +177,7 @@ export function createTrainLayer(maplibregl) {
       state.box = x1 < Infinity ? { x1, y1, x2, y2 } : null;
     },
   };
+  const setCoupled = c => { state.coupled = c; layer.train?.setCoupled(c); layer.map?.triggerRepaint(); };
   const setLivery = name => { const c = LIVERY[name] ?? LIVERY.other; if (state.livery !== name) { state.livery = name; M.red.color.set(c); } };
-  return { layer, state, setLivery };
+  return { layer, state, setLivery, setCoupled };
 }

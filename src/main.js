@@ -10,7 +10,7 @@ import { createGpsFilter } from './gps.js';
 import { ICON } from './icons.js';
 import { corridorSegment } from './tracks.js';
 import { viaStations } from './lines.js';
-import { dirOf, matchesDir, startName, timeProgress, distProgress, minutesUntil, buffer, stopFractions, livery } from './progress.js';
+import { dirOf, matchesDir, couple, startName, timeProgress, distProgress, minutesUntil, buffer, stopFractions, livery } from './progress.js';
 
 const HOME_ADDRESS = 'Koloniestraße 26, 86399 Bobingen';
 const HOME_FALLBACK = [10.8330, 48.2730]; // Bobingen (Mitte), falls die Adressuche nicht klappt
@@ -26,7 +26,14 @@ const MODES = { car: [ICON.car, 'Auto'], bike: [ICON.bike, 'Rad'], foot: [ICON.f
 
 let liveError = '';
 const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home2', HOME_FALLBACK), mode: store.get('zr.mode2', 'car'), walk: null, trainMarker: null, sheet: 'half', sheetVis: 220, loading: true, updated: null, limit: null, strict: store.get('zr.strict', true), fitFull: false, nav: false, follow: true, walkRemain: null, wake: null, meShown: null, meAnim: null, camTarget: null, railLines: new Map(), stopLabels: [], d3: store.get('zr.3d', true), markers: [], dir: store.get('zr.dir', 'muenchen'), me: null, meMarker: null, track: store.get('zr.track', false), trackTotal: 0, watch: null, lastRoute: { ll: null, t: 0 } };
-const vis = () => S.deps.filter(d => (S.strict ? matchesDir(d, S.dir) : dirOf(d) === S.dir));
+const vis = () => couple(S.deps.filter(d => (S.strict ? matchesDir(d, S.dir) : dirOf(d) === S.dir)));
+const parts = d => [d, ...(d?.coupled || [])];
+// gewählter Zug kann auch der zweite Teil eines gekoppelten Zugs sein: immer den ganzen (gekoppelten) Eintrag nehmen
+const groupOf = id => vis().find(d => parts(d).some(x => x.tripId === id));
+const shortLine = l => l.replace(/^[A-Za-z]{2,4}\s+(?=[A-Z]{1,3}\s?\d)/, '');   // „ARV RE89“ → „RE89“ (Farbe zeigt den Betreiber)
+const lineText = d => parts(d).map(x => x.line).join(' + ');
+const dirText = d => [...new Set(parts(d).map(x => x.direction))].join(' · ');
+const badges = (d, sm = '') => parts(d).map(x => `<span class="badge${sm}" data-livery="${livery(x)}">${x.line}</span>`).join('<span class="couple" title="gekoppelt">+</span>');
 const RULE = { augsburg: 'ab München Hbf/Pasing', muenchen: 'über München-Pasing/Hbf' };
 const DIRS = { muenchen: 'München', augsburg: 'Augsburg' };
 
@@ -318,7 +325,7 @@ async function refresh() {
     }
     S.loading = false; updateStatus();
     if (S.live) api.limit().then(l => { S.limit = l; }).catch(() => {});
-    if (!S.sel || !vis().find(d => d.tripId === S.sel)) S.sel = pickDefault()?.tripId;
+    if (!S.sel || !groupOf(S.sel)) S.sel = pickDefault()?.tripId;
     await selectTrip(S.sel, false, true);
   } finally { $('refresh').style.opacity = 1; refreshing = false; }
 }
@@ -338,8 +345,9 @@ function nextStop() {
 const railColorFor = t => { const worst = Math.max(0, ...t.stopovers.map(s => s.arrDelay ?? s.depDelay ?? 0)); return worst >= 5 ? '#ff3b30' : worst >= 1 ? '#ff9f0a' : '#34c759'; };
 
 async function selectTrip(id, fit, soft = false) {
+  id = groupOf(id)?.tripId ?? id;
   S.sel = id;
-  const dep = S.deps.find(d => d.tripId === id);
+  const dep = groupOf(id) || S.deps.find(d => d.tripId === id);
   await ensureLayers();
   // Gleicher Zug beim automatischen Aktualisieren: nur Zeiten erneuern, nichts neu aufbauen (kein Springen, kein Flackern)
   if (soft && dep && S.tr?.dep?.tripId === id) {
@@ -471,7 +479,7 @@ function humanError(e) {
 }
 
 function render() {
-  const list = vis(), i = list.findIndex(d => d.tripId === S.sel), dep = list[i];
+  const list = vis(), i = list.findIndex(d => parts(d).some(x => x.tripId === S.sel)), dep = list[i];
   const peek = $('sPeek'), half = $('sHalf'), full = $('sFull');
   if (S.loading && !S.deps.length) {
     peek.innerHTML = `<div class="row top"><span class="badge skel">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="dir skel-t">Lade Abfahrten …</span></div>
@@ -495,10 +503,10 @@ function render() {
     const eta = S.walk ? new Date(Date.now() + remainS() * 1000) : null;
     peek.innerHTML = `<div class="row top"><span class="navico">${MODES[S.mode][0]}</span><span class="dir">Zum Bahnhof</span>${S.follow ? '' : '<button class="pillbtn" id="recenter">Zentrieren</button>'}</div>
       <div class="times"><span class="big">${fmt(eta)}</span><span class="chip">${Math.ceil(remainS() / 60)} min</span><span class="sub" style="margin-left:auto">${(remainM() / 1000).toFixed(1)} km</span></div>
-      <div class="sub">${p ? `Zug ${dep.line} ab <b>${fmt(p.depT)}</b> · Gl. ${dep.platform}` : ''}</div>`;
+      <div class="sub">${p ? `Zug ${lineText(dep)} ab <b>${fmt(p.depT)}</b> · Gl. ${dep.platform}` : ''}</div>`;
     half.innerHTML = `<div id="prog"></div><button class="navbtn end" id="navend">Beenden</button>`;
   } else {
-    peek.innerHTML = `<div class="row top"><span class="badge" data-livery="${livery(dep)}">${dep.line}</span><span class="dir">${dep.direction}</span><span class="plat">Gl. ${dep.platform}</span></div>
+    peek.innerHTML = `<div class="row top">${badges(dep)}<span class="dir">${dirText(dep)}</span><span class="plat">Gl. ${dep.platform}</span></div>
       <div class="times"><span class="big ${dep.cancelled ? 'late' : cls(dMin)}">${dep.cancelled ? 'fällt aus' : fmt(depShown)}</span>${dep.cancelled ? '' : `${same(depPlan, depShown) ? '' : `<s>${fmt(depPlan)}</s>`}<span class="chip ${cls(dMin)}">${Math.abs(dMin) < 0.5 ? 'pünktlich' : sgn(dMin) + ' min'}</span>`}</div>
       <div class="sub">${leave ? `Spätestens los <b>${fmt(leave)}</b> · ${MODES[S.mode][0]} ${walkMin} min` : 'Weg wird berechnet …'}</div>`;
     half.innerHTML = `<div id="prog"></div>${S.walk ? `<button class="navbtn" id="navstart">${MODES[S.mode][0]} Route starten</button>` : ''}`;
@@ -519,7 +527,7 @@ function renderList(list) {
     const m = d.delay ?? 0, t = d.actual || d.planned;
     return `<button class="brow ${d.tripId === S.sel ? 'sel' : ''}${d.cancelled ? ' cx' : ''}" data-id="${d.tripId}">
       <span class="bt"><b class="${d.cancelled ? 'late' : cls(m)}">${d.cancelled ? `<s>${fmt(d.planned)}</s>` : fmt(t)}</b>${m >= 1 && !d.cancelled ? `<s>${fmt(d.planned)}</s>` : ''}</span>
-      <span class="badge sm" data-livery="${livery(d)}">${d.line}</span><span class="bd">${d.direction}</span><span class="bg">Gl. ${d.platform}</span>
+      ${badges(d, ' sm')}<span class="bd">${dirText(d)}</span><span class="bg">Gl. ${d.platform}</span>
       <span class="chip ${d.cancelled ? 'late' : cls(m)}">${d.cancelled ? 'Ausfall' : m >= 1 ? '+' + Math.round(m) : '±0'}</span></button>`;
   }).join('');
   return `<div class="bh"><b>Nächste Verbindungen</b><span class="sub">Richtung ${DIRS[S.dir]}</span></div><div class="blist">${rows || '<div class="sub" style="padding:8px 4px">Keine weiteren Verbindungen.</div>'}</div>`;
@@ -539,14 +547,15 @@ function renderTimeline(dep) {
       <span class="tl-d"></span><span class="tl-n">${s.name}${i === here ? ' <small>dein Bahnhof</small>' : ''}${s.cancelled ? ' <small class="late">Halt fällt aus</small>' : ''}</span>
       ${d >= 1 ? `<span class="chip ${cls(d)}">+${Math.round(d)}</span>` : ''}</div>`;
   }).join('');
-  return `<div class="bh tlh"><b>Verlauf</b><span class="sub">${dep.line} · ${dep.direction}</span></div><div class="tl">${rows}</div>`;
+  return `<div class="bh tlh"><b>Verlauf</b><span class="sub">${lineText(dep)} · ${dirText(dep)}</span></div><div class="tl">${rows}</div>`;
 }
 function renderDetails(dep, p) {
   const kv = (k, v) => `<div><span>${k}</span><span>${v}</span></div>`;
   const rows = [
     p && kv('Ankunft in ' + stName(), same(p.plannedArr, p.arr) ? `<b>${fmt(p.arr)}</b>` : `${fmt(p.plannedArr)} → <b>${fmt(p.arr)}</b>`),
     p && kv('Prognose', p.e.basis),
-    dep?.trainNo && kv('Zug', `${dep.category || ''} ${dep.trainNo}`),
+    dep?.trainNo && kv('Zug', parts(dep).map(x => `${x.category || ''} ${x.trainNo || ''}`.trim()).join(' + ')),
+    dep?.coupled?.length && kv('Gekoppelt', `<span class="kvcol">${parts(dep).map(x => `<span>${x.line} → ${x.direction}</span>`).join('')}<small>fahren zusammen, trennen sich später</small></span>`),
     dep?.plannedPlatform && dep.platform !== dep.plannedPlatform && kv('Gleiswechsel', `<span class="late">Gl. ${dep.platform} statt ${dep.plannedPlatform}</span>`),
     !S.nav && kv('Weg zum Bahnhof', `<button id="modebtn" class="pillbtn">${MODES[S.mode][0]} ${MODES[S.mode][1]}</button>`),
     !S.nav && kv('Richtungsfilter', `<span class="kvcol"><button id="strictbtn" class="pillbtn">${S.strict ? 'An' : 'Aus'}</button><small>${S.strict ? 'nur Züge ' + RULE[S.dir] : 'alle Züge'}</small></span>`),
@@ -563,7 +572,7 @@ function railInfo() {
   return (parts.length ? parts.join(' · ') : 'werden geladen …') + (probs ? `<span class="kvcol" style="margin-top:4px">${probs}</span>` : '');
 }
 function bindDetails() {
-  const sb = $('strictbtn'); if (sb) sb.onclick = e => { e.stopPropagation(); S.strict = !S.strict; store.set('zr.strict', S.strict); S.sel = vis().some(d => d.tripId === S.sel) ? S.sel : pickDefault()?.tripId; selectTrip(S.sel, false); };
+  const sb = $('strictbtn'); if (sb) sb.onclick = e => { e.stopPropagation(); S.strict = !S.strict; store.set('zr.strict', S.strict); S.sel = groupOf(S.sel) ? S.sel : pickDefault()?.tripId; selectTrip(S.sel, false); };
   const m = $('modebtn'); if (m) m.onclick = e => { e.stopPropagation(); const k = Object.keys(MODES); S.mode = k[(k.indexOf(S.mode) + 1) % k.length]; store.set('zr.mode2', S.mode); loadWalk().then(render); };
 }
 
@@ -680,7 +689,7 @@ function onFix(pos) {
   S.meAnim = { from: S.meShown || target, to: target, t0: now, dur: Math.min(1500, Math.max(400, now - (S.meAnim?.t0 ?? now - 1000))) };
   if (first || off || (!S.nav && (moved > 120 || Date.now() - S.lastRoute.t > 45000))) loadWalk().then(() => { if (S.nav) updateNav(pos); render(); layout(); if (first && !S.nav) fitAll(); });
   else { fillProg(); if (S.nav) updateNav(pos, r); }
-  if (S.nav && dist(ll, S.station.lonlat) < 70) { stopNav(); const p = prediction(); toast(p ? `Angekommen. ${S.tr.dep.line} fährt um ${fmt(p.depT)} von Gleis ${S.tr.dep.platform}.` : 'Angekommen.'); }
+  if (S.nav && dist(ll, S.station.lonlat) < 70) { stopNav(); const p = prediction(); toast(p ? `Angekommen. ${lineText(S.tr.dep)} fährt um ${fmt(p.depT)} von Gleis ${S.tr.dep.platform}.` : 'Angekommen.'); }
 }
 
 // ---- Navigation: Karte folgt dir, geneigt und nach vorn gedreht, ohne Abbiegehinweise ----
@@ -812,7 +821,8 @@ function tick() {
   if (!S.tr) { S.trainMarker?.remove(); S.trainMarker = null; S.trainLabel?.remove(); S.trainLabel = null; S.trainPos = null; return; }
   const pos = S.trainPos || positionAt(S.tr, new Date()).pos; // Position selbst setzt moveTrain bei jedem Bild
   // schmal halten: Betreiberkürzel weglassen (die Farbe zeigt den Betreiber), „ARV RE89“ → „RE89“
-  const d = S.tr.dep.delay ?? 0, ns = nextStop(), line = S.tr.dep.line.replace(/^[A-Za-z]{2,4}\s+(?=[A-Z]{1,3}\s?\d)/, '');
+  const d = S.tr.dep.delay ?? 0, ns = nextStop(), line = parts(S.tr.dep).map(x => shortLine(x.line)).join('+');
+  train3d.setCoupled(parts(S.tr.dep).length > 1);
   const html = `${line}${d >= 1 ? ` <b>+${Math.round(d)}</b>` : ''}${ns ? `<small>${fmt(ns.arr || ns.dep)} ${shortName(ns.name)}</small>` : ''}`;
   if (!S.trainMarker) S.trainMarker = new maplibregl.Marker({ element: el('trainmodel', TRAIN_SVG), anchor: 'center', rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat(pos).addTo(map);
   S.trainMarker.setLngLat(pos);
@@ -853,7 +863,7 @@ $('fit').onclick = () => { S.fitFull = !S.fitFull; $('fit').title = S.fitFull ? 
   render(); fitAll();
 })();
 if (S.track) navigator.permissions?.query({ name: 'geolocation' }).then(r => { if (r.state === 'granted') startTracking(); }).catch(() => {});
-if (location.hash === '#debug') Object.assign(window, { __map: map, __S: S, __t3d: train3d, __layout: layout });
+if (location.hash === '#debug') Object.assign(window, { __map: map, __S: S, __t3d: train3d, __layout: layout, __select: selectTrip, __render: render });
 setInterval(tick, 1000);
 // alle 8 s: fragt mehr an, als das Bahn-Kontingent hergibt; der Worker schöpft die 60 pro Minute aus und liefert sonst den letzten Stand
 setInterval(() => { if (!document.hidden) refresh().then(logObservation); }, 8000);

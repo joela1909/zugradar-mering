@@ -166,3 +166,6 @@ body.nav .dirctl,body.nav .status{display:none}
 .lbl.train-l small{display:block;font-weight:500;font-size:10px;opacity:.85;max-width:82px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lbl.train-l::after{content:"";position:absolute;left:50%;bottom:-4px;width:8px;height:8px;margin-left:-4px;background:inherit;transform:rotate(45deg);border-radius:2px;z-index:-1}
 .lbl.train-l.below::after{bottom:auto;top:-4px}
+
+/* gekoppelte Züge: Linien-Badges mit Kupplungszeichen */
+.couple{color:var(--mute);font-weight:700;font-size:12px;margin:0 -4px;flex:none}

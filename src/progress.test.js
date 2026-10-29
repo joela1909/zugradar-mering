@@ -54,3 +54,15 @@ test('Lackierung', () => {
   assert.equal(livery({ category: 'ICE', line: 'ICE 1' }), 'db');
   assert.equal(livery({ category: 'BRB', line: 'BRB RB67' }), 'other');
 });
+
+import { couple } from './progress.js';
+test('gekoppelte Züge: gleiche Planzeit und Richtung → ein Eintrag', () => {
+  const t = new Date('2026-10-29T14:52:00Z'), muc = ['Mering', 'München-Pasing', 'München Hbf'], aug = ['Kissing', 'Augsburg Hbf'];
+  const list = couple([
+    { tripId: 'a', line: 'RE80', planned: t, nextStops: muc },
+    { tripId: 'b', line: 'RE89', planned: new Date(+t), nextStops: muc },
+    { tripId: 'c', line: 'RB87', planned: t, nextStops: aug },                       // andere Richtung: eigener Zug
+    { tripId: 'd', line: 'RB86', planned: new Date(+t + 60000), nextStops: muc },    // eine Minute später: eigener Zug
+  ]);
+  assert.deepEqual(list.map(d => [d.tripId, d.coupled.map(x => x.tripId)]), [['a', ['b']], ['c', []], ['d', []]]);
+});
