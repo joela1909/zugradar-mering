@@ -80,7 +80,7 @@ async function db(env, path, fresh) {
 // Frische: Bahnhöfe 1 Tag, Fahrpläne 10 min, Echtzeit-Änderungen bei jeder Anfrage, solange das Kontingent reicht
 const station = async (env, pattern) => parseStations(await db(env, '/station/' + encodeURIComponent(pattern), 86400));
 const plan = async (env, eva, date) => parseTimetable(await db(env, `/plan/${eva}/${planPath(date)}`, 600));
-const changes = async (env, eva) => parseTimetable(await db(env, `/fchg/${eva}`, 0).catch(() => '<timetable/>'));
+const changes = async (env, eva, fresh = 0) => parseTimetable(await db(env, `/fchg/${eva}`, fresh).catch(() => '<timetable/>'));
 
 
 // Koordinaten aus den Stationsdaten der Bahn (EVA bzw. Name), sonst Ortssuche
@@ -178,7 +178,7 @@ async function resolve(env, name) {
   return s ? { eva: s.eva, name: s.name, location: known(s.name, s.eva) } : null;
 }
 
-// Fahrtverlauf: dieselbe Fahrt an allen Halten vom Start (München/Augsburg) bis 4 Halte nach dem Bahnhof suchen
+// Fahrtverlauf: dieselbe Fahrt an allen Halten vom Start (München/Augsburg) bis München Hbf bzw. 4 Halte nach Augsburg Hbf suchen
 async function trip(env, tripId) {
   const [id, eva, pt] = tripId.split('@');
   const base = parseTime(pt);
@@ -187,19 +187,20 @@ async function trip(env, tripId) {
   const ownName = (stations.find(r => r[0] === eva) || [])[1] || 'Mering St Afra';
   const win = trackWindow(splitPath(own.ar?.ppth), splitPath(own.dp?.ppth), 4);
   const key = tripKey(id);
-  const find = async (name, shifts) => {
+  const find = async (name, shifts, fresh) => {
     const st = await resolve(env, name); if (!st?.location) return null;
     const [sh0, ...rest] = shifts;
     for (const sh of [sh0, ...rest]) {
       const hit = (await plan(env, st.eva, addHours(base, sh))).find(x => tripKey(x.id) === key);
-      if (hit) return toStopover(st.name, st.eva, st.location, merge([hit], await changes(env, st.eva))[0]);
+      if (hit) return toStopover(st.name, st.eva, st.location, merge([hit], await changes(env, st.eva, fresh))[0]);
     }
     return null;
   };
   const n = win.before.length;
   // Reihenfolge nach Nähe zum Bahnhof: bei knappem Kontingent bekommen die nahen Halte die frischen Daten
   const jobs = [...win.before.map((name, i) => ({ side: 'b', i, d: n - i, name, sh: hourShifts(n - i, -1, base) })), ...win.after.map((name, i) => ({ side: 'a', i, d: i + 1, name, sh: hourShifts(i + 1, 1, base) }))].sort((x, y) => x.d - y.d);
-  const done = await Promise.all(jobs.map(j => find(j.name, j.sh).catch(() => null).then(r => ({ ...j, r }))));
+  // ferne Halte (> 4 Stationen) höchstens einmal pro Minute frisch, damit das Kontingent für die nahen reicht
+  const done = await Promise.all(jobs.map(j => find(j.name, j.sh, j.d > 4 ? 60 : 0).catch(() => null).then(r => ({ ...j, r }))));
   const beforeStops = win.before.map((_, i) => done.find(j => j.side === 'b' && j.i === i).r);
   const afterStops = win.after.map((_, i) => done.find(j => j.side === 'a' && j.i === i).r);
   const here1 = toStopover(ownName, eva, await locate(ownName, eva), own);

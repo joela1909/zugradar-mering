@@ -92,11 +92,16 @@ export function toStopover(name, eva, location, s) {
 export { splitPath };
 
 const START_STOP = /^(Augsburg Hbf|München Hbf|München[- ]Pasing)/;
-/** Tracking-Fenster: alle Halte ab Startbahnhof bis vor den Bahnhof + die nächsten nAfter Halte danach. */
+/**
+ * Tracking-Fenster: alle Halte ab Startbahnhof bis vor den Bahnhof, danach Richtung München bis München Hbf,
+ * Richtung Augsburg bis Augsburg Hbf + nAfter Halte (sonst nur die nächsten nAfter Halte).
+ */
 export function trackWindow(previous, next, nAfter = 4) {
   const i = previous.findIndex(n => START_STOP.test(n));
   const from = i >= 0 ? i : 0;
-  return { start: previous[from] || null, before: previous.slice(from), after: next.slice(0, nAfter) };
+  const muc = next.findIndex(n => /^München Hbf/.test(n)), aug = next.findIndex(n => /^Augsburg Hbf/.test(n));
+  const until = muc >= 0 ? muc + 1 : aug >= 0 ? aug + 1 + nAfter : nAfter;
+  return { start: previous[from] || null, before: previous.slice(from), after: next.slice(0, until) };
 }
 /** Plan-Stunden (Verschiebung gegenüber t0, in Stunden), in denen ein Halt k Stationen entfernt am wahrscheinlichsten liegt. */
 export function hourShifts(k, dir, t0, minPerStop = 4.5) {

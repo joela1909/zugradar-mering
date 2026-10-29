@@ -29,8 +29,13 @@ test('misc', () => { assert.equal(decode('a&amp;b'), 'a&b'); assert.equal(tripKe
 
 test('Tracking-Fenster', () => {
   const w = trackWindow(['Ulm', 'München Hbf', 'München-Pasing', 'Maisach', 'Mering'], ['Augsburg-Hochzoll', 'A2', 'A3', 'Augsburg Hbf', 'Ulm Hbf']);
-  assert.equal(w.start, 'München Hbf'); assert.deepEqual(w.before, ['München Hbf', 'München-Pasing', 'Maisach', 'Mering']); assert.equal(w.after.length, 4);
+  assert.equal(w.start, 'München Hbf'); assert.deepEqual(w.before, ['München Hbf', 'München-Pasing', 'Maisach', 'Mering']); assert.equal(w.after.length, 5);
   assert.deepEqual(trackWindow(['Dasing', 'Mering'], []).before, ['Dasing', 'Mering']);
+  // RB Richtung München: alle Halte bis München Hbf, nicht nur 4
+  const rb = ['Mering', 'Althegnenberg', 'Haspelmoor', 'Mammendorf', 'Malching (Oberbay)', 'Maisach', 'Gernlinden', 'Esting', 'Olching', 'Gröbenzell', 'München-Lochhausen', 'München-Langwied', 'München-Pasing', 'München Hbf'];
+  assert.deepEqual(trackWindow(['Augsburg Hbf', 'Kissing'], rb).after, rb);
+  // Richtung Augsburg: bis Augsburg Hbf + 4 danach
+  assert.equal(trackWindow(['München Hbf', 'Mering'], ['Kissing', 'Augsburg-Hochzoll', 'Augsburg Hbf', 'B1', 'B2', 'B3', 'B4', 'B5', 'B6']).after.at(-1), 'B4');
 });
 test('Stundenverschiebung', () => {
   const t0 = new Date('2026-10-28T18:05:00Z');
