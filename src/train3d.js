@@ -91,7 +91,7 @@ function endCar(yFace, L, dir, g) {
 }
 
 // Zug aus vier Wagen (Endwagen, 2 Doppelstockwagen, Endwagen); jeder Wagen mit seinem vorderen Ende bei y = 0 gebaut.
-// setCars(n) zeigt 4, 3 (1., 2., 4.) oder 2 Wagen (1. und 4.) und rückt sie mittig zusammen – beim Herauszoomen kürzer statt gestaucht.
+// setCars(n) zeigt 4, 3 (1., 2., 4.), 2 (1. und 4.) oder 1 Wagen (Endwagen) und rückt sie mittig zusammen – beim Herauszoomen kürzer statt gestaucht.
 const END_L = 26.4, MID_L = 25.4, GAP = .5;
 export function buildTrain() {
   const mk = f => { const c = new THREE.Group(); f(c); return c; };
@@ -105,7 +105,7 @@ export function buildTrain() {
   // heller Rand unter dem Zug (nur herausgezoomt sichtbar), damit er sich von Karte und Strecke abhebt
   const halo = new THREE.Mesh(new THREE.BoxGeometry(1, 1, .05), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .92, depthWrite: false }));
   halo.position.z = .03; train.add(halo); train.halo = halo;
-  const SHOW = { 4: [0, 1, 2, 3], 3: [0, 1, 3], 2: [0, 3] };
+  const SHOW = { 4: [0, 1, 2, 3], 3: [0, 1, 3], 2: [0, 3], 1: [0] };
   train.setCars = n => {
     if (train.cars === n) return; train.cars = n;
     const vis = SHOW[n].map(i => cars[i]), total = vis.reduce((s, c) => s + c.L, 0) + GAP * (vis.length - 1);
@@ -124,7 +124,7 @@ export function buildTrain() {
 const LIVERY = { db: 0xec0016, arverio: 0x2b7fd4, other: 0x6e6e73 };
 
 export function createTrainLayer(maplibregl) {
-  const TRAIN_WIDTH = 2.9, WIDTH_PX = 8, MIN_WIDTH_PX = 6, MAX_LEN_PX = 110; // Zugbreite in m; Bildschirmmaße beim Herauszoomen
+  const TRAIN_WIDTH = 2.9, WIDTH_PX = 12, MIN_WIDTH_PX = 9, MAX_LEN_PX = 110; // Zugbreite in m; Bildschirmmaße beim Herauszoomen
   const state = { lonlat: null, bearing: 0, visible: true };
   const layer = {
     id: 'train3d', type: 'custom', renderingMode: '3d',
@@ -143,7 +143,7 @@ export function createTrainLayer(maplibregl) {
       // Größe an den Zoom anpassen: gleichmäßig vergrößert (nie gestaucht), weiter draußen weniger Wagen;
       // ca. WIDTH_PX breit, aber höchstens MAX_LEN_PX lang (dann schmaler, mindestens MIN_WIDTH_PX)
       const z = this.map.getZoom(), mpp = 40075016.686 * Math.cos(state.lonlat[1] * Math.PI / 180) / (512 * 2 ** z);
-      this.train.setCars(z >= 18 ? 4 : z >= 16.5 ? 3 : 2);
+      this.train.setCars(z >= 18 ? 4 : z >= 16.5 ? 3 : 1);
       const s = Math.max(1, MIN_WIDTH_PX * mpp / TRAIN_WIDTH, Math.min(WIDTH_PX * mpp / TRAIN_WIDTH, MAX_LEN_PX * mpp / this.train.len));
       this.train.setHalo(s > 1.5 ? 2 * mpp / s : 0); // 2 px Rand
       const unit = mc.meterInMercatorCoordinateUnits();
