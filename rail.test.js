@@ -10,8 +10,9 @@ const els = [
   way(4, [90, 91], [[12, 50], [12.01, 50]]),
 ];
 test('Graph + kürzester Weg folgt dem direkten Gleis', () => {
-  const g = buildGraph(els), p = shortestPath(g, [10.0001, 48.0001], [10.0299, 48.0001]);
-  assert.ok(p && p.length === 4); assert.deepEqual(p[0], [10, 48]); assert.deepEqual(p.at(-1), [10.03, 48]);
+  const g = buildGraph(els), p = shortestPath(g, [10.001, 48.00001], [10.029, 48.00001]);
+  assert.ok(p && p.length === 4);
+  assert.ok(meters(p[0], [10.001, 48]) < 1 && meters(p.at(-1), [10.029, 48]) < 1); // endet genau gegenüber Start/Ziel, nicht am nächsten Stützpunkt
 });
 test('Umweg wenn das direkte Gleis fehlt', () => {
   const g = buildGraph(els.filter(e => e.id !== 1)); const p = shortestPath(g, [10, 48], [10.03, 48]);
@@ -46,7 +47,16 @@ test('Linien aus Kacheln: Nähte an Kachelgrenzen werden verbunden', () => {
   const branch = [[10.005, 48], [10.005, 48.01]];
   const g = buildGraphFromLines([left, right, branch]);
   const p = shortestPath(g, [10.0001, 48], [10.0199, 48]);
-  assert.ok(p && p.length >= 5); assert.deepEqual(p.at(-1), [10.02, 48]);
+  assert.ok(p && p.length >= 4); assert.ok(meters(p.at(-1), [10.0199, 48]) < 1);
   const q = shortestPath(g, [10.0001, 48], [10.005, 48.0099]); assert.ok(q);   // über den Abzweig
   assert.equal(shortestPath(buildGraphFromLines([left, [[10.012, 48], [10.02, 48]]]), [10, 48], [10.02, 48]), null); // 160 m Lücke: nicht verbunden
+});
+
+test('kein Überschießen: Halt mitten auf langem Gleisstück', () => {
+  // Gleis mit Stützpunkten nur alle 2 km; Bahnhof bei 1 km → Weg darf nicht bis 2 km und zurück laufen
+  const g = buildGraph([way(7, [1, 2, 3], [[10, 48], [10.027, 48], [10.054, 48]])]);
+  const p = shortestPath(g, [10.0135, 48.0001], [10.04, 48.0001]);
+  const lons = p.map(q => q[0]);
+  assert.ok(lons.every((x, i) => i === 0 || x >= lons[i - 1]), 'monoton, ohne Umkehr');
+  assert.ok(Math.abs(lons[0] - 10.0135) < 1e-6 && Math.abs(lons.at(-1) - 10.04) < 1e-6);
 });

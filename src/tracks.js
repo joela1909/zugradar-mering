@@ -57,11 +57,10 @@ const built = (() => {
   return { line, at };
 })();
 
-/** Gleisverlauf zwischen zwei Bahnhöfen (EVA) ohne die Endpunkte, oder null, wenn der Abschnitt nicht hinterlegt ist. */
+/** Gleisverlauf zwischen zwei Bahnhöfen (EVA) einschließlich der Bahnhöfe, oder null, wenn nicht hinterlegt. */
 export function corridorSegment(fromEva, toEva) {
   const a = built.at.get(String(fromEva)), b = built.at.get(String(toEva));
   if (a == null || b == null || a === b) return null;
-  const part = a < b ? built.line.slice(a, b + 1) : built.line.slice(b, a + 1).reverse();
-  return part.slice(1, -1);
+  return a < b ? built.line.slice(a, b + 1) : built.line.slice(b, a + 1).reverse();
 }
 export const corridorLine = () => built.line;

@@ -321,12 +321,17 @@ async function selectTrip(id, fit, soft = false) {
 }
 
 // Gerade Linien durch echte Gleise ersetzen: hinterlegte Abschnitte sofort, übrige aus OSM (lokal gemerkt)
+// Abschnitte aneinanderhängen: Gleiswege bleiben auf dem Gleis (kein Sprung zur Bahnhofskoordinate und zurück)
 function buildLine(st, segs) {
   const line = [];
-  segs.forEach((c, i) => { const seg = c ? [st[i].lonlat, ...c, st[i + 1].lonlat] : [st[i].lonlat, st[i + 1].lonlat]; line.push(...(line.length ? seg.slice(1) : seg)); });
+  segs.forEach((c, i) => {
+    const seg = c && c.length > 1 ? c : [st[i].lonlat, st[i + 1].lonlat];
+    const last = line[line.length - 1];
+    line.push(...(last && dist(last, seg[0]) < 0.5 ? seg.slice(1) : seg));
+  });
   return line;
 }
-// Gleisverlauf eines Abschnitts (ohne Endpunkte): fest hinterlegt, sonst aus den Kacheln; lange Abschnitte ohne Halt
+// Gleisverlauf eines Abschnitts (vom Gleis am Start- bis zum Gleis am Zielbahnhof): fest hinterlegt, sonst aus den Kacheln; lange Abschnitte ohne Halt
 // werden an den dazwischenliegenden Bahnhöfen geteilt (jedes Teilstück einzeln geladen und gemerkt)
 async function segmentCoords(a, b) {
   const fixed = corridorSegment(a.id, b.id); if (fixed) return fixed;
@@ -336,8 +341,12 @@ async function segmentCoords(a, b) {
   const parts = await Promise.all(via.slice(0, -1).map((p, k) => corridorSegment(p.eva, via[k + 1].eva) || api.rail(p.eva, via[k + 1].eva, p.ll, via[k + 1].ll)));
   if (!parts.some(Boolean)) return null;
   const out = [];
-  via.slice(0, -1).forEach((p, k) => { const seg = [p.ll, ...(parts[k] || []), via[k + 1].ll]; out.push(...(out.length ? seg.slice(1) : seg)); });
-  return out.slice(1, -1);
+  via.slice(0, -1).forEach((p, k) => {
+    const seg = parts[k] && parts[k].length > 1 ? parts[k] : [p.ll, via[k + 1].ll];
+    const last = out[out.length - 1];
+    out.push(...(last && dist(last, seg[0]) < 0.5 ? seg.slice(1) : seg));
+  });
+  return out;
 }
 async function refineRail(tr, tripId) {
   const st = tr.raw.stopovers;

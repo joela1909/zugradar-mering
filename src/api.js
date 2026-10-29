@@ -114,7 +114,7 @@ export function setTileTemplate(t) { if (t && !tileTemplate) { tileTemplate = t;
 /** Herkunft der Gleisabschnitte (für die Anzeige im großen Blatt) */
 export const railStats = { cache: 0, tiles: 0, overpass: 0, none: 0, fail: 0 };
 export async function rail(a, b, aLL, bLL) {
-  const k = `zr.rail.v5.${a}.${b}`;
+  const k = `zr.rail.v6.${a}.${b}`;
   try { const c = JSON.parse(localStorage.getItem(k)); if (c && (c.c || Date.now() - c.t < 864e5)) { railStats[c.c ? 'cache' : 'none']++; return c.c; } } catch {}
   if (!aLL || !bLL) return null;
   const job = overpassQueue.then(async () => {

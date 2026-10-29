@@ -35,20 +35,46 @@ class Heap { // Min-Heap für Dijkstra
   get size() { return this.a.length; }
 }
 
-/** Kürzester Weg entlang der Gleise von startLL nach endLL; null, wenn nicht verbunden oder zu weit von den Gleisen. */
+/** Nächster Punkt auf einem Gleisstück (Projektion), nicht nur auf einem Stützpunkt */
+export function nearestOnEdge(g, ll, maxDist = 600) {
+  let best = null, bd = maxDist;
+  const kx = Math.cos(ll[1] * Math.PI / 180);
+  for (const [a, list] of g.adj) {
+    const A = g.pos.get(a);
+    for (const { to: b } of list) {
+      if (b < a) continue; // jede Kante nur einmal
+      const B = g.pos.get(b), dx = (B[0] - A[0]) * kx, dy = B[1] - A[1], l2 = dx * dx + dy * dy;
+      const t = l2 ? Math.max(0, Math.min(1, (((ll[0] - A[0]) * kx) * dx + (ll[1] - A[1]) * dy) / l2)) : 0;
+      const p = [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t], d = meters(p, ll);
+      if (d < bd) { bd = d; best = { a, b, p }; }
+    }
+  }
+  return best;
+}
+
+/**
+ * Kürzester Weg entlang der Gleise von startLL nach endLL. Start und Ziel werden auf den nächsten Punkt eines
+ * Gleisstücks gesetzt (Projektion) – so endet der Weg genau am Bahnhof und fährt nicht bis zum nächsten Stützpunkt
+ * weiter und wieder zurück. null, wenn nicht verbunden oder zu weit von den Gleisen.
+ */
 export function shortestPath(g, startLL, endLL, maxSnap = 600) {
-  const s = nearestNode(g, startLL, maxSnap), t = nearestNode(g, endLL, maxSnap);
-  if (s == null || t == null) return null;
-  const dist = new Map([[s, 0]]), prev = new Map(), heap = new Heap(); heap.push(0, s);
+  const s = nearestOnEdge(g, startLL, maxSnap), t = nearestOnEdge(g, endLL, maxSnap);
+  if (!s || !t) return null;
+  if ((s.a === t.a && s.b === t.b)) return [s.p, t.p]; // gleiches Gleisstück
+  const S = '#start', T = '#ziel', extra = new Map([[S, [{ to: s.a, w: meters(s.p, g.pos.get(s.a)) }, { to: s.b, w: meters(s.p, g.pos.get(s.b)) }]]]);
+  const toT = new Map([[t.a, meters(t.p, g.pos.get(t.a))], [t.b, meters(t.p, g.pos.get(t.b))]]);
+  const dist = new Map([[S, 0]]), prev = new Map(), heap = new Heap(); heap.push(0, S);
   while (heap.size) {
     const [d, u] = heap.pop();
-    if (u === t) break;
+    if (u === T) break;
     if (d > (dist.get(u) ?? Infinity)) continue;
-    for (const { to, w } of g.adj.get(u) || []) { const nd = d + w; if (nd < (dist.get(to) ?? Infinity)) { dist.set(to, nd); prev.set(to, u); heap.push(nd, to); } }
+    const out = [...(extra.get(u) || g.adj.get(u) || [])];
+    if (toT.has(u)) out.push({ to: T, w: toT.get(u) });
+    for (const { to, w } of out) { const nd = d + w; if (nd < (dist.get(to) ?? Infinity)) { dist.set(to, nd); prev.set(to, u); heap.push(nd, to); } }
   }
-  if (!dist.has(t)) return null;
-  const ids = [t]; while (ids[0] !== s) ids.unshift(prev.get(ids[0]));
-  return ids.map(id => g.pos.get(id));
+  if (!dist.has(T)) return null;
+  const ids = [T]; while (ids[0] !== S) ids.unshift(prev.get(ids[0]));
+  return ids.map(id => (id === S ? s.p : id === T ? t.p : g.pos.get(id)));
 }
 
 /** Punkte ausdünnen (mindestens minGap Meter Abstand; Anfang und Ende bleiben). */
