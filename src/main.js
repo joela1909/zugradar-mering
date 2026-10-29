@@ -223,9 +223,11 @@ function trainLabelRect() {
   e.classList.toggle('below', blocked);
   return blocked ? { x1: above.x1, y1: b.y2 + LABEL_GAP, x2: above.x2, y2: b.y2 + LABEL_GAP + h } : above;
 }
+// im render-Ereignis, also im selben Bild wie der Zug gezeichnet wird – sonst läuft das Label ein Bild voraus und zittert
 function placeTrainLabel() {
-  const r = trainLabelRect(); if (!r || !S.trainPos) return;
-  const p = map.project(S.trainPos);
+  const ll = train3d.state.lonlat, r = trainLabelRect(); if (!r || !ll || !S.trainLabel) return;
+  S.trainLabel.setLngLat(ll);
+  const p = map.project(ll);
   S.trainLabel.getElement().style.display = '';
   S.trainLabel.setOffset([(r.x1 + r.x2) / 2 - p.x, (r.y1 + r.y2) / 2 - p.y]);
 }
@@ -738,8 +740,7 @@ function moveTrain(dt) {
   const pos = pointAt(tr.polyline, tr.cum, trainD), brg = bearingTo(pointAt(tr.polyline, tr.cum, trainD - 25), pointAt(tr.polyline, tr.cum, trainD + 25));
   S.trainPos = pos;
   train3d.state.lonlat = pos; train3d.state.bearing = brg;
-  S.trainLabel?.setLngLat(pos);
-  const it = labels.find(l => l.trainLabel); if (it) it.ll = pos;
+  const it = labels.find(l => l.trainLabel); if (it) it.ll = pos; // das Label selbst folgt im selben Kartenbild (placeTrainLabel)
   S.railF = trainD / total; setRailProgress(S.railF);
   map.triggerRepaint();
 }
@@ -818,7 +819,7 @@ function tick() {
   const lv = livery(S.tr.dep); train3d.setLivery(lv);
   if (!train3d.state.lonlat) train3d.state.lonlat = pos;
   syncTrainLook();
-  if (!S.trainLabel) { S.trainLabel = mk(el('lbl train-l', html), pos); labels.push({ marker: S.trainLabel, ll: pos, prio: 0, essential: true, trainLabel: true }); S.trainLabel.getElement().style.zIndex = 6; }
+  if (!S.trainLabel) { S.trainLabel = new maplibregl.Marker({ element: el('lbl train-l', html), anchor: 'center', subpixelPositioning: true }).setLngLat(pos).addTo(map); labels.push({ marker: S.trainLabel, ll: pos, prio: 0, essential: true, trainLabel: true }); S.trainLabel.getElement().style.zIndex = 6; }
   if (S.trainLabel.getElement().innerHTML !== html) S.trainLabel.getElement().innerHTML = html;
   S.trainLabel.getElement().dataset.livery = lv;
   markStationBuffer();
