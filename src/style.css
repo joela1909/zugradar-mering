@@ -132,3 +132,7 @@ html,body{background:var(--land)}
 .navico{font-size:22px}
 body.nav .dirctl,body.nav .status{display:none}
 .tag.navtag .big{font-size:40px}
+
+.toast{position:fixed;left:50%;top:calc(max(12px,env(safe-area-inset-top)) + 4px);z-index:8;transform:translate(-50%,-12px);opacity:0;padding:12px 18px;border-radius:18px;font-size:15px;font-weight:600;letter-spacing:-.01em;max-width:calc(100% - 32px);text-align:center;transition:opacity .3s ease,transform .3s ease}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.tklabels span{font-size:11px}

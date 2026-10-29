@@ -6,6 +6,7 @@ import { prepare, positionAt } from './train.js';
 import { expectedDelay, record, histKey } from './predict.js';
 import { dist, splitRoute, bearing as bearingTo } from './geo.js';
 import { createTrainLayer } from './train3d.js';
+import { createGpsFilter } from './gps.js';
 import { dirOf, matchesDir, startName, timeProgress, distProgress, minutesUntil, buffer, stopFractions, livery } from './progress.js';
 
 const HOME_ADDRESS = 'Koloniestraße 26, 86399 Bobingen';
@@ -21,7 +22,7 @@ const store = { get: (k, f) => { try { return JSON.parse(localStorage.getItem(k)
 const MODES = { car: ['🚗', 'Auto'], bike: ['🚲', 'Rad'], foot: ['🚶', 'zu Fuß'] };
 
 let liveError = '';
-const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home2', HOME_FALLBACK), mode: store.get('zr.mode2', 'car'), walk: null, trainMarker: null, board: false, strict: store.get('zr.strict', true), fitFull: false, nav: false, follow: true, walkRemain: null, wake: null, d3: store.get('zr.3d', true), markers: [], dir: store.get('zr.dir', 'muenchen'), me: null, meMarker: null, track: store.get('zr.track', false), trackTotal: 0, watch: null, lastRoute: { ll: null, t: 0 } };
+const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home2', HOME_FALLBACK), mode: store.get('zr.mode2', 'car'), walk: null, trainMarker: null, board: false, strict: store.get('zr.strict', true), fitFull: false, nav: false, follow: true, walkRemain: null, wake: null, meShown: null, meAnim: null, camTarget: null, railLines: new Map(), stopLabels: [], d3: store.get('zr.3d', true), markers: [], dir: store.get('zr.dir', 'muenchen'), me: null, meMarker: null, track: store.get('zr.track', false), trackTotal: 0, watch: null, lastRoute: { ll: null, t: 0 } };
 const vis = () => S.deps.filter(d => (S.strict ? matchesDir(d, S.dir) : dirOf(d) === S.dir));
 const RULE = { augsburg: 'ab München Hbf/Pasing', muenchen: 'über München-Pasing/Hbf' };
 const DIRS = { muenchen: 'München', augsburg: 'Augsburg' };
@@ -111,6 +112,13 @@ let labels = [], dots = [];
 const reg = (marker, ll, prio, o = {}) => { labels.push({ marker, ll, prio, ...o }); return marker; };
 const rect = (cx, cy, w, h) => ({ x1: cx - w / 2, y1: cy - h / 2, x2: cx + w / 2, y2: cy + h / 2 });
 const hit = (a, b) => !(a.x2 <= b.x1 || a.x1 >= b.x2 || a.y2 <= b.y1 || a.y1 >= b.y2);
+// Rasterindex: Kollisionen nur gegen Hindernisse in benachbarten Zellen prüfen (statt gegen alle)
+class Grid {
+  constructor(c = 48) { this.c = c; this.m = new Map(); }
+  cells(r, f) { const c = this.c; for (let x = Math.floor(r.x1 / c); x <= Math.floor(r.x2 / c); x++) for (let y = Math.floor(r.y1 / c); y <= Math.floor(r.y2 / c); y++) f(x + ',' + y); }
+  add(r) { this.cells(r, k => { const a = this.m.get(k); a ? a.push(r) : this.m.set(k, [r]); }); return this; }
+  hits(r) { let h = false; this.cells(r, k => { if (!h) h = (this.m.get(k) || []).some(o => hit(o, r)); }); return h; }
+}
 // Linien als kleine Rechtecke in Bildschirmkoordinaten (Hindernisse für Labels)
 function lineRects(coords) {
   const out = [], W = innerWidth, H = innerHeight, inside = p => p.x > -60 && p.x < W + 60 && p.y > -60 && p.y < H + 60;
@@ -125,29 +133,58 @@ function lineRects(coords) {
   }
   return out;
 }
+// Linie für das Layout ausdünnen: etwa ein Punkt pro 8 Bildschirmpixel, je Zoomstufe zwischengespeichert
+const decCache = new WeakMap();
+function decimate(line) {
+  if (!line || line.length < 3) return line;
+  const zb = Math.round(map.getZoom() * 2), c = decCache.get(line);
+  if (c && c.zb === zb) return c.out;
+  const minM = 8 * 40075016.686 * Math.cos(line[0][1] * Math.PI / 180) / (512 * 2 ** map.getZoom());
+  const out = [line[0]]; let last = line[0];
+  for (const q of line) if (dist(last, q) >= minM) { out.push(q); last = q; }
+  out.push(line[line.length - 1]);
+  decCache.set(line, { zb, out });
+  return out;
+}
 function layout() {
   const points = [...dots, S.station.lonlat, ...(S.me ? [S.me] : [])].map(ll => { const p = map.project(ll); return rect(p.x, p.y, 14, 14); });
   if (S.trainPos) { const p = map.project(S.trainPos); points.push(rect(p.x, p.y, 60, 60)); }
-  const rail = lineRects(S.tr?.polyline), walk = lineRects(S.walk?.coords);
-  const placed = [...points];
+  const rail = lineRects(decimate(S.tr?.polyline)), walk = lineRects(decimate(S.walk?.coords));
+  const placed = new Grid(), railG = new Grid(), walkG = new Grid();
+  points.forEach(r => placed.add(r)); rail.forEach(r => railG.add(r)); walk.forEach(r => walkG.add(r));
+  // Bedienelemente sind Hindernisse, und Schilder müssen ganz auf dem Bildschirm liegen
+  [$('dirctl'), $('status'), $('tag'), $('board'), $('toast'), document.querySelector('.fabs')]
+    .filter(e => e && !e.hidden && e.getClientRects().length)
+    .forEach(e => { const b = e.getBoundingClientRect(); placed.add({ x1: b.left - 4, y1: b.top - 4, x2: b.right + 4, y2: b.bottom + 4 }); });
+  const onScreen = r => r.x1 >= 6 && r.y1 >= 6 && r.x2 <= innerWidth - 6 && r.y2 <= innerHeight - 6;
   const items = labels.filter(l => l.marker.getElement().isConnected).sort((a, b) => a.prio - b.prio);
   for (const it of items) {
     const el = it.marker.getElement(); el.style.display = '';
     const { x, y } = map.project(it.ll), w = el.offsetWidth + 6, h = el.offsetHeight + 6, gx = w / 2 + 3, gy = h / 2 + 3;
     const dirs = [[0, -1], [0, 1], [1, 0], [-1, 0], [.8, -.8], [-.8, -.8], [.8, .8], [-.8, .8]];
     const cands = it.fixed ? [[0, 0]] : [1, 1.3, 1.7].flatMap(k => dirs.map(([a, b]) => [a * gx * k, b * gy * k]));
-    const free = (o, obstacles) => !obstacles.some(r => hit(r, rect(x + o[0], y + o[1], w, h)));
-    const lineObs = [...rail, ...(it.onWalk ? [] : walk)];
-    let pick = cands.find(o => free(o, placed) && free(o, lineObs));
-    if (!pick && it.essential) pick = cands.find(o => free(o, placed));
+    const at = o => rect(x + o[0], y + o[1], w, h);
+    let pick = cands.find(o => { const r = at(o); return onScreen(r) && !placed.hits(r) && !railG.hits(r) && (it.onWalk || !walkG.hits(r)); });
+    if (!pick && it.essential) pick = cands.find(o => { const r = at(o); return onScreen(r) && !placed.hits(r); }) || cands.find(o => onScreen(at(o)));
     if (!pick) { if (!it.essential) { el.style.display = 'none'; continue; } pick = cands[0]; }
-    it.marker.setOffset(pick); placed.push(rect(x + pick[0], y + pick[1], w, h));
+    it.marker.setOffset(pick); placed.add(at(pick));
   }
 }
-map.on('moveend', layout); map.on('zoomend', layout);
+// höchstens alle 500 ms neu anordnen (Kamerafahrten lösen sonst bei jedem Schritt ein Layout aus)
+let layoutTimer = null, layoutLast = 0;
+function scheduleLayout() {
+  const wait = 500 - (Date.now() - layoutLast);
+  if (wait <= 0) { layoutLast = Date.now(); layout(); }
+  else if (!layoutTimer) layoutTimer = setTimeout(() => { layoutTimer = null; layoutLast = Date.now(); layout(); }, wait);
+}
+map.on('moveend', scheduleLayout);
 let stationMarker, homeMarker, walkMarker, stationDot;
 
 function placeBase() {
+  const st0 = S.tr?.stops?.find((_, i) => i === S.tr.stopIdx);
+  const pinHtml = `🚉 ${S.station.name.replace(' (Demo)', '')}${st0 ? `<small>${planTimes(prediction())}</small>` : ''}`;
+  const sameSpot = (m, ll) => m && m.getLngLat().lng === ll[0] && m.getLngLat().lat === ll[1];
+  if (sameSpot(stationMarker, S.station.lonlat) && sameSpot(homeMarker, S.home)) { stationMarker.getElement().innerHTML = pinHtml; scheduleLayout(); return; }
   labels = labels.filter(l => l.marker !== stationMarker && l.marker !== homeMarker);
   stationMarker?.remove(); homeMarker?.remove(); stationDot?.remove();
   const st = S.tr?.stops?.find((_, i) => i === S.tr.stopIdx);
@@ -185,7 +222,9 @@ async function loadWalk() {
   walkMarker._zr = { marker: walkMarker, ll: mid, prio: 2, essential: true, onWalk: true }; labels.push(walkMarker._zr); layout();
 }
 
+let refreshing = false;
 async function refresh() {
+  if (refreshing) return; refreshing = true;
   $('refresh').style.opacity = .4;
   try {
     try {
@@ -199,8 +238,8 @@ async function refresh() {
     $('mode').textContent = S.live ? 'LIVE' : 'DEMO'; $('mode').className = S.live ? 'live' : '';
     $('err').textContent = S.live ? '' : liveError;
     if (!S.sel || !vis().find(d => d.tripId === S.sel)) S.sel = pickDefault()?.tripId;
-    await selectTrip(S.sel, false);
-  } finally { $('refresh').style.opacity = 1; }
+    await selectTrip(S.sel, false, true);
+  } finally { $('refresh').style.opacity = 1; refreshing = false; }
 }
 
 function pickDefault() {
@@ -209,26 +248,46 @@ function pickDefault() {
   return ok.find(d => addMin(d.actual || d.planned, -walkMin) > now) || ok.find(d => addMin(d.actual || d.planned, 1) > now) || list[0];
 }
 
-async function selectTrip(id, fit) {
+const stopHtml = s => { const d = s.arrDelay ?? s.depDelay ?? 0; return `${shortName(s.name)}<br><i class="${cls(d)}">${fmt(s.arr || s.dep)}${d >= 1 ? ' +' + Math.round(d) : ''}</i>`; };
+const railColorFor = t => { const worst = Math.max(0, ...t.stopovers.map(s => s.arrDelay ?? s.depDelay ?? 0)); return worst >= 5 ? '#ff3b30' : worst >= 1 ? '#ff9f0a' : '#34c759'; };
+
+async function selectTrip(id, fit, soft = false) {
   S.sel = id;
   const dep = S.deps.find(d => d.tripId === id);
   await ensureLayers();
+  // Gleicher Zug beim automatischen Aktualisieren: nur Zeiten erneuern, nichts neu aufbauen (kein Springen, kein Flackern)
+  if (soft && dep && S.tr?.dep?.tripId === id) {
+    try {
+      const t = S.live ? await api.trip(id, S.station) : await S.demo.trip(id);
+      const sig = x => x.stopovers.map(s => s.name).join('|');
+      if (S.sel === id && sig(t) === sig(S.tr.raw)) {
+        const line = S.railLines.get(id) || t.polyline;
+        const stopIdx = t.stopovers.findIndex(s => (S.station.id && s.id === S.station.id) || /afra/i.test(s.name));
+        S.tr = { ...prepare(t.stopovers, line), raw: t, dep, stopIdx };
+        S.railColor = railColorFor(t);
+        map.getSource('rail').setData(lineFeat(line, { color: S.railColor }));
+        S.stopLabels.forEach(({ i, marker }) => { const s = t.stopovers[i]; if (s) marker.getElement().innerHTML = stopHtml(s); });
+        if (!S.railLines.has(id)) refineRail(S.tr, id);
+        placeBase(); render(); tick();
+        return;
+      }
+    } catch (e) { console.warn(e); return; }
+  }
   S.markers.forEach(m => m.remove()); S.markers = []; dots = []; labels = labels.filter(l => !l.stop);
   if (!dep) { S.tr = null; map.getSource('rail').setData(emptyFC); render(); return; }
   try {
     const t = S.live ? await api.trip(id, S.station) : await S.demo.trip(id);
     const stopIdx = t.stopovers.findIndex(s => (S.station.id && s.id === S.station.id) || /afra/i.test(s.name));
-    S.tr = { ...prepare(t.stopovers, t.polyline), raw: t, dep, stopIdx };
-    const worst = Math.max(0, ...t.stopovers.map(s => s.arrDelay ?? s.depDelay ?? 0));
-    const color = worst >= 5 ? '#ff3b30' : worst >= 1 ? '#ff9f0a' : '#34c759';
-    S.railColor = color;
-    map.getSource('rail').setData(lineFeat(t.polyline, { color }));
-    refineRail(S.tr, id);
+    const line = S.railLines.get(id) || t.polyline;
+    S.tr = { ...prepare(t.stopovers, line), raw: t, dep, stopIdx };
+    S.railColor = railColorFor(t);
+    map.getSource('rail').setData(lineFeat(line, { color: S.railColor }));
+    if (!S.railLines.has(id)) refineRail(S.tr, id);
+    S.stopLabels = [];
     t.stopovers.forEach((s, i) => {
       if (i === stopIdx || dist(s.lonlat, S.station.lonlat) < 900) return;
-      const d = s.arrDelay ?? s.depDelay ?? 0, tm = s.arr || s.dep;
-      const e = el('lbl', `${shortName(s.name)}<br><i class="${cls(d)}">${fmt(tm)}${d >= 1 ? ' +' + Math.round(d) : ''}</i>`);
-      S.markers.push(reg(mk(e, s.lonlat), s.lonlat, 5 + Math.abs(i - stopIdx), { stop: true }));
+      const marker = reg(mk(el('lbl', stopHtml(s)), s.lonlat), s.lonlat, 5 + Math.abs(i - stopIdx), { stop: true });
+      S.markers.push(marker); S.stopLabels.push({ i, marker });
       S.markers.push(mk(el('dot', ''), s.lonlat)); dots.push(s.lonlat);
     });
   } catch (e) { console.warn(e); S.tr = null; map.getSource('rail').setData(emptyFC); }
@@ -244,6 +303,7 @@ async function refineRail(tr, tripId) {
   if (S.sel !== tripId || S.tr !== tr || !segs.some(Boolean)) return;
   const line = [];
   segs.forEach((c, i) => { const seg = c ? [st[i].lonlat, ...c, st[i + 1].lonlat] : [st[i].lonlat, st[i + 1].lonlat]; line.push(...(line.length ? seg.slice(1) : seg)); });
+  S.railLines.set(tripId, line); if (S.railLines.size > 30) S.railLines.delete(S.railLines.keys().next().value);
   S.tr = { ...tr, ...prepare(st, line) };
   map.getSource('rail').setData(lineFeat(line, { color: S.railColor }));
   tick(); layout();
@@ -292,7 +352,7 @@ function render() {
   const canNav = !!S.walk && (S.mode === 'car' || S.mode === 'bike' || S.mode === 'foot');
   const eta = S.walk ? new Date(Date.now() + remainS() * 1000) : null;
   $('tag').innerHTML = S.nav ? `
-  <div class="row top"><span class="navico">${MODES[S.mode][0]}</span><span class="dir">Fahrt zum Bahnhof Mering-St Afra</span>${S.follow ? '' : '<button class="pillbtn" id="recenter">Zentrieren</button>'}</div>
+  <div class="row top"><span class="navico">${MODES[S.mode][0]}</span><span class="dir">Zum Bahnhof</span>${S.follow ? '' : '<button class="pillbtn" id="recenter">Zentrieren</button>'}</div>
   <div class="times"><span class="big">${fmt(eta)}</span><span class="chip">${Math.ceil(remainS() / 60)} min</span><span class="sub" style="margin-left:auto">${(remainM() / 1000).toFixed(1)} km</span></div>
   <div class="sub">${p && leave ? `Zug ${dep.line} ab <b>${fmt(p.depT)}</b>${dep.delay >= 1 ? ` (+${Math.round(dep.delay)})` : ''}` : ''}</div>
   <div id="prog"></div>
@@ -374,17 +434,22 @@ function fillProg() {
 }
 
 // ---- Live-Standort ----
+const gpsOk = createGpsFilter();
 function onFix(pos) {
   const ll = [pos.coords.longitude, pos.coords.latitude], first = !S.me;
+  if (!gpsOk({ ll, t: pos.timestamp || Date.now(), acc: pos.coords.accuracy ?? 999 })) return; // alte/grobe/springende Positionen ignorieren
   S.me = ll;
-  if (!S.meMarker) S.meMarker = mk(el('gps', ''), ll); else S.meMarker.setLngLat(ll);
+  if (!S.meMarker) { S.meMarker = mk(el('gps', ''), ll); S.meShown = ll; }
   const moved = S.lastRoute.ll ? dist(S.lastRoute.ll, ll) : Infinity;
   const r = S.nav && S.walk ? splitRoute(S.walk.coords, ll) : null;
   const off = r && r.off > 45;                       // von der Route abgekommen → neu berechnen
   if (r) { S.walkRemain = r.remaining; drawWalk(); }
+  // Punkt gleitet zur neuen Position; in der Navigation auf die Route eingerastet (wie Navi-Apps)
+  const target = r && r.off < 25 ? r.rest[0] : ll, now = performance.now();
+  S.meAnim = { from: S.meShown || target, to: target, t0: now, dur: Math.min(1500, Math.max(400, now - (S.meAnim?.t0 ?? now - 1000))) };
   if (first || off || (!S.nav && (moved > 120 || Date.now() - S.lastRoute.t > 45000))) loadWalk().then(() => { if (S.nav) updateNav(pos); render(); layout(); if (first && !S.nav) fitAll(); });
   else { fillProg(); if (S.nav) updateNav(pos, r); }
-  if (S.nav && dist(ll, S.station.lonlat) < 70) { stopNav(); }
+  if (S.nav && dist(ll, S.station.lonlat) < 70) { stopNav(); const p = prediction(); toast(p ? `Angekommen. ${S.tr.dep.line} fährt um ${fmt(p.depT)} von Gleis ${S.tr.dep.platform}.` : 'Angekommen.'); }
 }
 
 // ---- Navigation: Karte folgt dir, geneigt und nach vorn gedreht, ohne Abbiegehinweise ----
@@ -399,11 +464,35 @@ function updateNav(pos, r) {
   const pad = { top: 110, bottom: ($('tag').offsetHeight || 220) + 36, left: 56, right: 76 };
   const pitchFor = z => Math.max(20, Math.min(62, 20 + (z - 10) * 6.5));
   let cam = map.cameraForBounds(b, { padding: pad, bearing: brg, pitch: 0, maxZoom: 17.2 });
-  if (!cam) { map.easeTo({ center: S.me, zoom: 15, bearing: brg, pitch: 45, duration: 900, easing: t => t }); return; }
+  if (!cam) { S.camTarget = { center: S.me, zoom: 15, bearing: brg, pitch: 45 }; return; }
   const pitch = pitchFor(cam.zoom);
   cam = map.cameraForBounds(b, { padding: pad, bearing: brg, pitch, maxZoom: 17.2 }) || cam;
-  map.easeTo({ center: cam.center, zoom: cam.zoom, bearing: brg, pitch, duration: 1100, easing: t => t });
+  const c = maplibregl.LngLat.convert(cam.center);
+  S.camTarget = { center: [c.lng, c.lat], zoom: cam.zoom, bearing: brg, pitch };
 }
+
+// Ein Animationsloop: Standortpunkt gleitet linear, Kamera folgt weich (keine sich unterbrechenden easeTo-Fahrten)
+let lastFrame = performance.now();
+function frame(now) {
+  const dt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
+  const A = S.meAnim;
+  if (A && S.meMarker) {
+    const f = Math.min(1, (now - A.t0) / A.dur);
+    S.meShown = [A.from[0] + (A.to[0] - A.from[0]) * f, A.from[1] + (A.to[1] - A.from[1]) * f];
+    S.meMarker.setLngLat(S.meShown);
+    if (f >= 1) S.meAnim = null;
+  }
+  const T = S.camTarget;
+  if (S.nav && S.follow && T && !map.isMoving()) {
+    const k = 1 - Math.exp(-dt / 0.6), c = map.getCenter(), z = map.getZoom(), b = map.getBearing(), p = map.getPitch();
+    const db = ((T.bearing - b + 540) % 360) - 180;
+    const settled = Math.abs(T.center[0] - c.lng) < 2e-7 && Math.abs(T.center[1] - c.lat) < 2e-7 && Math.abs(T.zoom - z) < .002 && Math.abs(db) < .05 && Math.abs(T.pitch - p) < .05;
+    if (!settled) { navJumping = true; map.jumpTo({ center: [c.lng + (T.center[0] - c.lng) * k, c.lat + (T.center[1] - c.lat) * k], zoom: z + (T.zoom - z) * k, bearing: b + db * k, pitch: p + (T.pitch - p) * k }); navJumping = false; }
+  }
+  requestAnimationFrame(frame);
+}
+let navJumping = false;
+requestAnimationFrame(frame);
 async function startNav() {
   S.nav = true; S.follow = true; document.body.classList.add('nav');
   if (S.watch == null) startTracking();
@@ -414,11 +503,17 @@ async function startNav() {
 function stopNav() {
   S.nav = false; document.body.classList.remove('nav');
   try { S.wake?.release(); } catch {} S.wake = null;
-  map.easeTo({ padding: { top: 0, bottom: 0, left: 0, right: 0 }, duration: 500 });
+  S.camTarget = null;
   drawWalk(); render(); fitAll();
 }
-map.on('dragstart', () => { if (S.nav) { S.follow = false; render(); } });
+// Wer selbst schiebt, zoomt oder dreht, übernimmt die Kamera; „Zentrieren“ gibt sie zurück
+const userTook = e => { if (S.nav && S.follow && e.originalEvent && !navJumping) { S.follow = false; render(); } };
+['dragstart', 'zoomstart', 'rotatestart', 'pitchstart'].forEach(ev => map.on(ev, userTook));
 document.addEventListener('visibilitychange', async () => { if (document.visibilityState === 'visible' && S.nav) { try { S.wake = await navigator.wakeLock?.request('screen'); } catch {} } });
+function toast(text, ms = 6000) {
+  const t = $('toast'); t.textContent = text; t.hidden = false; requestAnimationFrame(() => t.classList.add('show'));
+  clearTimeout(toast.h); toast.h = setTimeout(() => { t.classList.remove('show'); setTimeout(() => (t.hidden = true), 300); }, ms);
+}
 function startTracking() {
   if (!navigator.geolocation) { alert('Standort wird von diesem Browser nicht unterstützt.'); return; }
   if (S.watch != null) return;
@@ -426,12 +521,12 @@ function startTracking() {
   S.watch = navigator.geolocation.watchPosition(onFix, e => {
     console.warn('GPS', e.code, e.message);
     if (e.code === 1) { stopNav(); stopTracking(); alert('Standort nicht erlaubt. Bitte in den Einstellungen für diese Seite freigeben.'); } // nur bei verweigerter Berechtigung beenden; Zeitlimit/Funkloch ignorieren
-  }, { enableHighAccuracy: true, maximumAge: 5000 });
+  }, { enableHighAccuracy: true, maximumAge: 0 });
 }
 function stopTracking() {
   if (S.watch != null) navigator.geolocation.clearWatch(S.watch);
   S.watch = null; S.track = false; store.set('zr.track', false); $('gps').classList.remove('on');
-  S.meMarker?.remove(); S.meMarker = null; S.me = null; S.trackTotal = 0;
+  S.meMarker?.remove(); S.meMarker = null; S.me = null; S.meShown = null; S.meAnim = null; S.trackTotal = 0;
   loadWalk().then(() => { render(); layout(); });
 }
 $('gps').onclick = () => { if (S.nav) { S.follow = true; render(); updateNav(); return; } S.watch != null ? stopTracking() : startTracking(); };
@@ -462,6 +557,7 @@ function syncTrainLook() {
 map.on('zoom', syncTrainLook);
 
 function tick() {
+  if (document.hidden && !S.nav) return; // Akku schonen, wenn die Seite nicht sichtbar ist
   if (!S.tr) { S.trainMarker?.remove(); S.trainMarker = null; S.trainLabel?.remove(); S.trainLabel = null; S.trainPos = null; return; }
   const now = new Date(), p = positionAt(S.tr, now);
   const live = S.live && S.tr.raw.currentLocation && p.state === 'fährt';
@@ -475,8 +571,8 @@ function tick() {
   if (!S.trainLabel) { S.trainLabel = mk(el('lbl train-l', html), pos); labels.push({ marker: S.trainLabel, ll: pos, prio: 0, essential: true, trainLabel: true }); }
   const it = labels.find(l => l.trainLabel); if (it) it.ll = pos;
   S.trainLabel.setLngLat(pos); S.trainLabel.getElement().innerHTML = html; S.trainLabel.getElement().dataset.livery = lv;
-  layout(); fillProg();
-  if (S.nav && S.follow && ++navTicks % 4 === 0) updateNav();
+  scheduleLayout(); fillProg();
+  if (S.nav && S.follow && ++navTicks % 2 === 0) updateNav();
 }
 let navTicks = 0;
 
@@ -501,6 +597,7 @@ $('fit').onclick = () => { S.fitFull = !S.fitFull; $('fit').title = S.fitFull ? 
   render(); fitAll();
 })();
 if (S.track) navigator.permissions?.query({ name: 'geolocation' }).then(r => { if (r.state === 'granted') startTracking(); }).catch(() => {});
-if (location.hash === '#debug') Object.assign(window, { __map: map, __S: S, __t3d: train3d });
+if (location.hash === '#debug') Object.assign(window, { __map: map, __S: S, __t3d: train3d, __layout: layout });
 setInterval(tick, 1000);
-setInterval(() => { refresh().then(logObservation); }, 30000);
+setInterval(() => { if (!document.hidden) refresh().then(logObservation); }, 30000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
