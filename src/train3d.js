@@ -90,21 +90,35 @@ function endCar(yFace, L, dir, g) {
   tip.position.y = dir > 0 ? yb : yb - body; g.add(tip);
 }
 
-function buildDesiro() {
-  const g = new THREE.Group(), endL = 26.4, midL = 25.4, gap = .5, front = 52.5;
-  endCar(front, endL, 1, g);
-  const y1 = front - endL - gap; deckCar(y1, midL, g);
-  const y2 = y1 - midL - gap; deckCar(y2, midL, g);
-  endCar(y2 - midL - gap - endL, endL, -1, g);
-  return g;
+// Zug aus vier Wagen (Endwagen, 2 Doppelstockwagen, Endwagen); jeder Wagen mit seinem vorderen Ende bei y = 0 gebaut.
+// setCars(n) zeigt 4, 3 (1., 2., 4.) oder 2 Wagen (1. und 4.) und rückt sie mittig zusammen – beim Herauszoomen kürzer statt gestaucht.
+const END_L = 26.4, MID_L = 25.4, GAP = .5;
+export function buildTrain() {
+  const mk = f => { const c = new THREE.Group(); f(c); return c; };
+  const cars = [
+    { g: mk(c => endCar(0, END_L, 1, c)), L: END_L },
+    { g: mk(c => deckCar(0, MID_L, c)), L: MID_L },
+    { g: mk(c => deckCar(0, MID_L, c)), L: MID_L },
+    { g: mk(c => endCar(-END_L, END_L, -1, c)), L: END_L },
+  ];
+  const train = new THREE.Group(); cars.forEach(c => train.add(c.g));
+  const SHOW = { 4: [0, 1, 2, 3], 3: [0, 1, 3], 2: [0, 3] };
+  train.setCars = n => {
+    if (train.cars === n) return; train.cars = n;
+    const vis = SHOW[n].map(i => cars[i]), total = vis.reduce((s, c) => s + c.L, 0) + GAP * (vis.length - 1);
+    let y = total / 2;
+    cars.forEach(c => { c.g.visible = vis.includes(c); });
+    for (const c of vis) { c.g.position.y = y; y -= c.L + GAP; }
+  };
+  train.setCars(4);
+  return train;
 }
-export const buildTrain = buildDesiro;
 
 /** Benutzerdefinierte MapLibre-Ebene: ein 3D-Zug an einer Position, in Fahrtrichtung gedreht. */
 const LIVERY = { db: 0xec0016, arverio: 0x2b7fd4, other: 0x6e6e73 };
 
 export function createTrainLayer(maplibregl) {
-  const TRAIN_LENGTH = 105, TRAIN_WIDTH = 2.9, TARGET_PX = 64, TARGET_WIDTH_PX = 15; // Modelllänge in m, gewünschte Mindestlänge auf dem Bildschirm
+  const TRAIN_WIDTH = 2.9, MIN_WIDTH_PX = 8; // Zugbreite in m, Mindestbreite auf dem Bildschirm
   const state = { lonlat: null, bearing: 0, visible: true };
   const layer = {
     id: 'train3d', type: 'custom', renderingMode: '3d',
@@ -113,21 +127,23 @@ export function createTrainLayer(maplibregl) {
       this.camera = new THREE.Camera(); this.scene = new THREE.Scene();
       this.scene.add(new THREE.AmbientLight(0xffffff, 2.1));
       const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(-.4, -.7, 1).normalize(); this.scene.add(sun);
-      this.scene.add(buildTrain());
+      this.train = buildTrain(); this.scene.add(this.train);
       this.renderer = new THREE.WebGLRenderer({ canvas: map.getCanvas(), context: gl, antialias: true });
       this.renderer.autoClear = false;
     },
     render(gl, args) {
       if (!state.lonlat || !state.visible) return;
       const mc = maplibregl.MercatorCoordinate.fromLngLat(state.lonlat, 0);
-      // Größe an den Zoom anpassen: mindestens TARGET_PX lang, bei starkem Zoom echte Größe
-      const mpp = 40075016.686 * Math.cos(state.lonlat[1] * Math.PI / 180) / (512 * 2 ** this.map.getZoom());
+      // Größe an den Zoom anpassen: gleichmäßig vergrößert (nie gestaucht), mindestens MIN_WIDTH_PX breit; weiter draußen weniger Wagen
+      const z = this.map.getZoom(), mpp = 40075016.686 * Math.cos(state.lonlat[1] * Math.PI / 180) / (512 * 2 ** z);
+      this.train.setCars(z >= 18 ? 4 : z >= 16.5 ? 3 : 2);
+      const s = Math.max(1, MIN_WIDTH_PX * mpp / TRAIN_WIDTH);
       const unit = mc.meterInMercatorCoordinateUnits();
-      // Reihenfolge (von rechts): erst Länge/Breite entlang der Zugachsen strecken, dann in Fahrtrichtung drehen, dann nach Mercator (y gespiegelt)
+      // Reihenfolge (von rechts): vergrößern, in Fahrtrichtung drehen, nach Mercator (y gespiegelt)
       const model = new THREE.Matrix4().makeTranslation(mc.x, mc.y, mc.z)
         .multiply(new THREE.Matrix4().makeScale(unit, -unit, unit))
         .multiply(new THREE.Matrix4().makeRotationZ(-state.bearing * Math.PI / 180))
-        .multiply(new THREE.Matrix4().makeScale(Math.max(1, TARGET_WIDTH_PX * mpp / TRAIN_WIDTH), Math.max(1, TARGET_PX * mpp / TRAIN_LENGTH), Math.max(1, TARGET_WIDTH_PX * mpp / TRAIN_WIDTH)));
+        .multiply(new THREE.Matrix4().makeScale(s, s, s));
       this.camera.projectionMatrix = new THREE.Matrix4().fromArray(args.defaultProjectionData?.mainMatrix ?? args.modelViewProjectionMatrix).multiply(model);
       this.renderer.resetState();
       this.renderer.render(this.scene, this.camera);
