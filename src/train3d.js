@@ -151,6 +151,16 @@ export function createTrainLayer(maplibregl) {
       this.camera.projectionMatrix = new THREE.Matrix4().fromArray(args.defaultProjectionData?.mainMatrix ?? args.modelViewProjectionMatrix).multiply(model);
       this.renderer.resetState();
       this.renderer.render(this.scene, this.camera);
+      // Umriss des Zugs auf dem Bildschirm (CSS-Pixel), damit das Zug-Label darüber schweben kann und andere Labels ausweichen
+      const c = this.map.getCanvas(), cw = c.clientWidth, ch = c.clientHeight, h = this.train.len / 2, v = new THREE.Vector4();
+      let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+      for (const X of [-1.5, 1.5]) for (const Y of [-h, h]) for (const Z of [0, 4.6]) {
+        v.set(X, Y, Z, 1).applyMatrix4(this.camera.projectionMatrix);
+        if (v.w <= 0) continue;
+        const px = (v.x / v.w + 1) / 2 * cw, py = (1 - v.y / v.w) / 2 * ch;
+        x1 = Math.min(x1, px); x2 = Math.max(x2, px); y1 = Math.min(y1, py); y2 = Math.max(y2, py);
+      }
+      state.box = x1 < Infinity ? { x1, y1, x2, y2 } : null;
     },
   };
   const setLivery = name => { const c = LIVERY[name] ?? LIVERY.other; if (state.livery !== name) { state.livery = name; M.red.color.set(c); } };

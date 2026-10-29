@@ -176,7 +176,9 @@ function decimate(line) {
 }
 function layout() {
   const points = [...dots, S.station.lonlat, ...(S.me ? [S.me] : [])].map(ll => { const p = map.project(ll); return rect(p.x, p.y, 14, 14); });
-  if (S.trainPos) { const p = map.project(S.trainPos); points.push(rect(p.x, p.y, 60, 60)); }
+  const tb = trainBox();
+  if (tb) { points.push(tb); const lr = trainLabelRect(); if (lr) points.push(lr); }
+  else if (S.trainPos) { const p = map.project(S.trainPos); points.push(rect(p.x, p.y, 60, 60)); }
   const rail = lineRects(decimate(S.tr?.polyline)), walk = lineRects(decimate(S.walk?.coords));
   const placed = new Grid(), railG = new Grid(), walkG = new Grid();
   points.forEach(r => placed.add(r)); rail.forEach(r => railG.add(r)); walk.forEach(r => walkG.add(r));
@@ -185,8 +187,13 @@ function layout() {
     .filter(e => e && !e.hidden && e.getClientRects().length)
     .forEach(e => { const b = e.getBoundingClientRect(); placed.add({ x1: b.left - 4, y1: b.top - 4, x2: b.right + 4, y2: b.bottom + 4 }); });
   const onScreen = r => r.x1 >= 6 && r.y1 >= 6 && r.x2 <= innerWidth - 6 && r.y2 <= innerHeight - 6;
-  const items = labels.filter(l => l.marker.getElement().isConnected).sort((a, b) => a.prio - b.prio);
+  const items = labels.filter(l => l.marker.getElement().isConnected && !(l.trainLabel && tb)).sort((a, b) => a.prio - b.prio);
+  // aufräumen: höchstens 3 Halte-Labels (wichtigste zuerst); den nächsten Halt zeigt schon das Zug-Label
+  const next = nextStop();
+  let stopsShown = 0;
   for (const it of items) {
+    if (it.stop && (stopsShown >= 3 || (next && it.name === next.name))) { it.marker.getElement().style.display = 'none'; continue; }
+
     const el = it.marker.getElement(); el.style.display = '';
     const { x, y } = map.project(it.ll), w = el.offsetWidth + 6, h = el.offsetHeight + 6, gx = w / 2 + 3, gy = h / 2 + 3;
     const dirs = [[0, -1], [0, 1], [1, 0], [-1, 0], [.8, -.8], [-.8, -.8], [.8, .8], [-.8, .8]];
@@ -196,8 +203,28 @@ function layout() {
     if (!pick && it.essential) pick = cands.find(o => { const r = at(o); return onScreen(r) && !placed.hits(r); }) || cands.find(o => onScreen(at(o)));
     if (!pick) { if (!it.essential) { el.style.display = 'none'; continue; } pick = cands[0]; }
     it.marker.setOffset(pick); placed.add(at(pick));
+    if (it.stop) stopsShown++;
   }
 }
+// Umriss des 3D-Zugs auf dem Bildschirm (vom Modell bei jedem Bild gemeldet), mit etwas Luft
+function trainBox() {
+  const b = train3d.state.box; if (!b || !S.trainPos) return null;
+  return { x1: b.x1 - 3, y1: b.y1 - 3, x2: b.x2 + 3, y2: b.y2 + 3 };
+}
+// Zug-Label schwebt mittig über dem Zug, nie auf ihm (bei jedem Bild nachgeführt)
+const LABEL_GAP = 9;
+function trainLabelRect() {
+  const e = S.trainLabel?.getElement(), b = trainBox(); if (!e || !b) return null;
+  const w = e.offsetWidth, h = e.offsetHeight, cx = (b.x1 + b.x2) / 2;
+  return { x1: cx - w / 2, y1: b.y1 - LABEL_GAP - h, x2: cx + w / 2, y2: b.y1 - LABEL_GAP };
+}
+function placeTrainLabel() {
+  const r = trainLabelRect(); if (!r || !S.trainPos) return;
+  const p = map.project(S.trainPos);
+  S.trainLabel.getElement().style.display = '';
+  S.trainLabel.setOffset([(r.x1 + r.x2) / 2 - p.x, (r.y1 + r.y2) / 2 - p.y]);
+}
+map.on('render', placeTrainLabel);
 // höchstens alle 500 ms neu anordnen (Kamerafahrten lösen sonst bei jedem Schritt ein Layout aus)
 let layoutTimer = null, layoutLast = 0;
 function scheduleLayout() {
@@ -296,6 +323,11 @@ function pickDefault() {
 }
 
 const stopHtml = s => { const d = s.arrDelay ?? s.depDelay ?? 0; return `${shortName(s.name)}<br><i class="${cls(d)}">${fmt(s.arr || s.dep)}${d >= 1 ? ' +' + Math.round(d) : ''}</i>`; };
+// nächster Halt des Zugs (steht im Zug-Label)
+function nextStop() {
+  const now = Date.now(), st = S.tr?.raw.stopovers || [];
+  return st.find(s => +(s.arr || s.dep) > now) || null;
+}
 const railColorFor = t => { const worst = Math.max(0, ...t.stopovers.map(s => s.arrDelay ?? s.depDelay ?? 0)); return worst >= 5 ? '#ff3b30' : worst >= 1 ? '#ff9f0a' : '#34c759'; };
 
 async function selectTrip(id, fit, soft = false) {
@@ -336,7 +368,7 @@ async function selectTrip(id, fit, soft = false) {
     S.stopLabels = [];
     t.stopovers.forEach((s, i) => {
       if (i === stopIdx || dist(s.lonlat, S.station.lonlat) < 900) return;
-      const marker = reg(mk(el('lbl', stopHtml(s)), s.lonlat), s.lonlat, 5 + Math.abs(i - stopIdx), { stop: true });
+      const marker = reg(mk(el('lbl', stopHtml(s)), s.lonlat), s.lonlat, 5 + Math.abs(i - stopIdx), { stop: true, name: s.name });
       S.markers.push(marker); S.stopLabels.push({ i, marker });
       S.markers.push(mk(el('dot', ''), s.lonlat)); dots.push(s.lonlat);
     });
@@ -754,12 +786,13 @@ function tick() {
   const live = S.live && S.tr.raw.currentLocation && p.state === 'fährt';
   const pos = live ? S.tr.raw.currentLocation : p.pos;
   S.trainPos = pos;
-  const d = S.tr.dep.delay ?? 0, html = `${S.tr.dep.line}${d >= 1 ? ` <b>+${Math.round(d)}</b>` : ''}`;
+  const d = S.tr.dep.delay ?? 0, ns = nextStop();
+  const html = `${S.tr.dep.line}${d >= 1 ? ` <b>+${Math.round(d)}</b>` : ''}${ns ? `<small>→ ${shortName(ns.name)} ${fmt(ns.arr || ns.dep)}</small>` : ''}`;
   if (!S.trainMarker) S.trainMarker = new maplibregl.Marker({ element: el('trainmodel', TRAIN_SVG), anchor: 'center', rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat(pos).addTo(map);
   S.trainMarker.setLngLat(pos).setRotation(p.bearing || 0);
   const lv = livery(S.tr.dep); train3d.setLivery(lv);
   train3d.state.lonlat = pos; train3d.state.bearing = p.bearing || 0; syncTrainLook();
-  if (!S.trainLabel) { S.trainLabel = mk(el('lbl train-l', html), pos); labels.push({ marker: S.trainLabel, ll: pos, prio: 0, essential: true, trainLabel: true }); }
+  if (!S.trainLabel) { S.trainLabel = mk(el('lbl train-l', html), pos); labels.push({ marker: S.trainLabel, ll: pos, prio: 0, essential: true, trainLabel: true }); S.trainLabel.getElement().style.zIndex = 6; }
   const it = labels.find(l => l.trainLabel); if (it) it.ll = pos;
   S.trainLabel.setLngLat(pos); S.trainLabel.getElement().innerHTML = html; S.trainLabel.getElement().dataset.livery = lv;
   S.railF = p.progress; setRailProgress(p.progress); markStationBuffer();

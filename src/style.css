@@ -103,7 +103,7 @@ body.nav .dirctl,body.nav .status{display:none}
 .lbl .ontime{color:#248a3d}.lbl .minor{color:#c93400}.lbl .late{color:#d70015}
 .lbl.route{background:#0066cc;color:#fff;font-size:12px;padding:4px 10px;border-radius:12px;box-shadow:0 4px 14px rgba(0,102,204,.4);white-space:nowrap;max-width:none}
 .lbl.train-l{background:#1d1d1f;color:#fff;font-size:12px;padding:3px 9px;border-radius:99px;white-space:nowrap;max-width:none}.lbl.train-l b{color:#ff9f0a}
-.lbl.train-l[data-livery=db]{background:#ec0016}.lbl.train-l[data-livery=arverio]{background:#0b5fb3}
+.lbl.train-l[data-livery=db]{background:#ec0016}.lbl.train-l[data-livery=arverio]{background:#1f7ae0}
 .lbl.train-l[data-livery=db] b,.lbl.train-l[data-livery=arverio] b{color:#fff;opacity:.9}
 .me{padding:6px 12px;border-radius:14px;background:#fff;color:#1d1d1f;font-weight:600;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.22)}
 .dot{width:9px;height:9px;border-radius:50%;background:#fff;border:2px solid #1d1d1f}
@@ -160,3 +160,8 @@ body.nav .dirctl,body.nav .status{display:none}
 #sPeek.upd .times{animation:zr-upd .45s ease}
 #sPeek.swap{animation:zr-swap .35s ease}
 @media (prefers-reduced-motion:reduce){#sPeek.upd .times,#sPeek.swap{animation:none}}
+
+/* Zug-Label schwebt als Sprechblase über dem Zug, darunter der nächste Halt */
+.lbl.train-l{font-size:12.5px;padding:4px 10px 5px;border-radius:12px;text-align:left;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.lbl.train-l small{display:block;font-weight:500;font-size:11px;opacity:.85}
+.lbl.train-l::after{content:"";position:absolute;left:50%;bottom:-5px;width:10px;height:10px;margin-left:-5px;background:inherit;transform:rotate(45deg);border-radius:2px;z-index:-1}
