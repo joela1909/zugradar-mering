@@ -460,9 +460,14 @@ function renderDetails(dep, p) {
     !S.nav && kv('Richtungsfilter', `<span class="kvcol"><button id="strictbtn" class="pillbtn">${S.strict ? 'An' : 'Aus'}</button><small>${S.strict ? 'nur Züge ' + RULE[S.dir] : 'alle Züge'}</small></span>`),
     kv('Daten', S.live ? `DB live${S.updated ? ` · ${S.updated.toLocaleTimeString('de-DE')}` : ''}` : 'Demo'),
     S.limit && S.limit.used != null && kv('Bahn-Abfragen', `${S.limit.used} von ${S.limit.limit} pro Minute`),
+    S.live && kv('Gleislinien', railInfo()),
     liveError && kv('Technik', `<small class="tech">${liveError.replace(/</g, '&lt;')}</small>`),
   ].filter(Boolean).join('');
   return `<div class="bd2">${rows}</div>`;
+}
+function railInfo() {
+  const r = api.railStats, parts = [r.tiles && `${r.tiles} aus Karte`, r.cache && `${r.cache} gespeichert`, r.overpass && `${r.overpass} Overpass`, r.none && `${r.none} ohne Gleis`, r.fail && `${r.fail} nicht erreichbar`].filter(Boolean);
+  return parts.length ? parts.join(' · ') : 'werden geladen …';
 }
 function bindDetails() {
   const sb = $('strictbtn'); if (sb) sb.onclick = e => { e.stopPropagation(); S.strict = !S.strict; store.set('zr.strict', S.strict); S.sel = vis().some(d => d.tripId === S.sel) ? S.sel : pickDefault()?.tripId; selectTrip(S.sel, false); };
