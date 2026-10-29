@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test src/predict.test.js src/progress.test.js iris.test.js rail.test.js src/geo.test.js src/gps.test.js limiter.test.js src/tracks.test.js src/tilerail.test.js"
+    "test": "node --test src/predict.test.js src/progress.test.js iris.test.js rail.test.js src/geo.test.js src/gps.test.js limiter.test.js src/tracks.test.js src/tilerail.test.js src/lines.test.js"
   },
   "dependencies": {
     "@mapbox/vector-tile": "^3.0.0",

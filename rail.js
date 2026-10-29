@@ -102,16 +102,31 @@ export function buildGraphFromLines(lines, stitch = 6) {
       if (i === 0 || i === ln.length - 1) ends.push([id, li]);
     });
   });
-  const C = 0.0001, cell = p => Math.floor(p[0] / C) + ':' + Math.floor(p[1] / C), grid = new Map();
-  for (const [id, p] of pos) { const k = cell(p); (grid.get(k) || grid.set(k, []).get(k)).push(id); }
+  // Linienenden mit dem nächsten Punkt auf einem Gleisstück einer anderen Linie verbinden (nicht nur mit Stützpunkten:
+  // auf geraden Strecken liegen die in Kacheln oft Hunderte Meter auseinander)
+  const segs = [];
+  lines.forEach((ln, li) => { for (let i = 1; i < ln.length; i++) { const a = key(ln[i - 1]), b = key(ln[i]); if (a !== b) segs.push([a, b, li]); } });
+  const C = 0.0005, grid = new Map();
+  segs.forEach((sg, si) => {
+    const p = pos.get(sg[0]), q = pos.get(sg[1]);
+    for (let x = Math.floor(Math.min(p[0], q[0]) / C) - 1; x <= Math.floor(Math.max(p[0], q[0]) / C) + 1; x++)
+      for (let y = Math.floor(Math.min(p[1], q[1]) / C) - 1; y <= Math.floor(Math.max(p[1], q[1]) / C) + 1; y++) { const k = x + ':' + y; (grid.get(k) || grid.set(k, []).get(k)).push(si); }
+  });
   for (const [id, li] of ends) {
-    const p = pos.get(id), cx = Math.floor(p[0] / C), cy = Math.floor(p[1] / C);
+    const p = pos.get(id), k = Math.floor(p[0] / C) + ':' + Math.floor(p[1] / C);
     let best = null, bd = stitch;
-    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (const o of grid.get((cx + dx) + ':' + (cy + dy)) || []) {
-      if (o === id || lineOf.get(o) === li) continue;
-      const d = meters(p, pos.get(o)); if (d < bd) { bd = d; best = o; }
+    for (const si of grid.get(k) || []) {
+      const [a, b, sl] = segs[si]; if (sl === li) continue;
+      const A = pos.get(a), B = pos.get(b), kx = Math.cos(p[1] * Math.PI / 180);
+      const dx = (B[0] - A[0]) * kx, dy = B[1] - A[1], l2 = dx * dx + dy * dy;
+      const t = l2 ? Math.max(0, Math.min(1, (((p[0] - A[0]) * kx) * dx + (p[1] - A[1]) * dy) / l2)) : 0;
+      const proj = [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t], d = meters(p, proj);
+      if (d < bd) { bd = d; best = { a, b, proj }; }
     }
-    if (best) { link(id, best, bd); link(best, id, bd); }
+    if (!best) continue;
+    const pid = key(best.proj);
+    if (!pos.has(pid)) pos.set(pid, best.proj);
+    for (const o of [best.a, best.b, id]) if (o !== pid) { const w = meters(pos.get(o), best.proj); link(pid, o, w); link(o, pid, w); }
   }
   return { pos, adj };
 }

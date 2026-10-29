@@ -9,6 +9,7 @@ import { createTrainLayer } from './train3d.js';
 import { createGpsFilter } from './gps.js';
 import { ICON } from './icons.js';
 import { corridorSegment } from './tracks.js';
+import { viaStations } from './lines.js';
 import { dirOf, matchesDir, startName, timeProgress, distProgress, minutesUntil, buffer, stopFractions, livery } from './progress.js';
 
 const HOME_ADDRESS = 'Koloniestraße 26, 86399 Bobingen';
@@ -325,6 +326,19 @@ function buildLine(st, segs) {
   segs.forEach((c, i) => { const seg = c ? [st[i].lonlat, ...c, st[i + 1].lonlat] : [st[i].lonlat, st[i + 1].lonlat]; line.push(...(line.length ? seg.slice(1) : seg)); });
   return line;
 }
+// Gleisverlauf eines Abschnitts (ohne Endpunkte): fest hinterlegt, sonst aus den Kacheln; lange Abschnitte ohne Halt
+// werden an den dazwischenliegenden Bahnhöfen geteilt (jedes Teilstück einzeln geladen und gemerkt)
+async function segmentCoords(a, b) {
+  const fixed = corridorSegment(a.id, b.id); if (fixed) return fixed;
+  const via = viaStations(a.id, b.id);
+  if (!via) return api.rail(a.id, b.id, a.lonlat, b.lonlat);
+  via[0] = { ...via[0], ll: a.lonlat }; via[via.length - 1] = { ...via.at(-1), ll: b.lonlat };
+  const parts = await Promise.all(via.slice(0, -1).map((p, k) => corridorSegment(p.eva, via[k + 1].eva) || api.rail(p.eva, via[k + 1].eva, p.ll, via[k + 1].ll)));
+  if (!parts.some(Boolean)) return null;
+  const out = [];
+  via.slice(0, -1).forEach((p, k) => { const seg = [p.ll, ...(parts[k] || []), via[k + 1].ll]; out.push(...(out.length ? seg.slice(1) : seg)); });
+  return out.slice(1, -1);
+}
 async function refineRail(tr, tripId) {
   const st = tr.raw.stopovers;
   const segs = st.slice(0, -1).map((s, i) => corridorSegment(s.id, st[i + 1].id));
@@ -341,7 +355,7 @@ async function refineRail(tr, tripId) {
   if (!S.live) return;
   // übrige Abschnitte aus OSM, nahe Halte zuerst; jeder fertige Abschnitt wird sofort gezeichnet
   const order = segs.map((_, i) => i).filter(i => !segs[i]).sort((x, y) => Math.abs(x - tr.stopIdx) - Math.abs(y - tr.stopIdx));
-  await Promise.all(order.map(i => api.rail(st[i].id, st[i + 1].id, st[i].lonlat, st[i + 1].lonlat).then(c => {
+  await Promise.all(order.map(i => segmentCoords(st[i], st[i + 1]).then(c => {
     if (!c) return;
     segs[i] = c;
     clearTimeout(pending); pending = setTimeout(apply, 150);

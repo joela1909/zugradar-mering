@@ -112,7 +112,7 @@ const tileWait = new Promise(r => (tileReady = r));
 export function setTileTemplate(t) { if (t && !tileTemplate) { tileTemplate = t; tileReady(t); } }
 
 export async function rail(a, b, aLL, bLL) {
-  const k = `zr.rail.v3.${a}.${b}`;
+  const k = `zr.rail.v4.${a}.${b}`;
   try { const c = JSON.parse(localStorage.getItem(k)); if (c && (c.c || Date.now() - c.t < 864e5)) return c.c; } catch {}
   if (!aLL || !bLL) return null;
   const job = overpassQueue.then(async () => {
