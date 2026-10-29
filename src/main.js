@@ -192,6 +192,7 @@ function placeBase() {
   stationMarker = reg(mk(el('pin', pinHtml), S.station.lonlat), S.station.lonlat, 1, { essential: true });
   homeMarker = reg(mk(el('me', `${ICON.home} Koloniestraße 26`), S.home), S.home, 1, { essential: true });
   stationDot = mk(el('dot station', ''), S.station.lonlat);
+  stationMarker.getElement().style.zIndex = 4; homeMarker.getElement().style.zIndex = 3;
   layout();
 }
 function planTimes(p) { return p ? (same(p.plannedDep, p.depT) ? `<b>${fmt(p.depT)}</b>` : `${fmt(p.plannedDep)} → <b style="color:#fca5a5">${fmt(p.depT)}</b>`) : ''; }
@@ -220,7 +221,7 @@ async function loadWalk() {
   walkMarker?.remove();
   const mid = S.walk.coords[Math.floor(S.walk.coords.length / 2)];
   walkMarker = mk(el('lbl route', `${MODES[S.mode][0]} ${Math.ceil(S.walk.seconds / 60)} min · ${(S.walk.meters / 1000).toFixed(1)} km`), mid);
-  walkMarker._zr = { marker: walkMarker, ll: mid, prio: 2, essential: true, onWalk: true }; labels.push(walkMarker._zr); layout();
+  walkMarker._zr = { marker: walkMarker, ll: mid, prio: 2, onWalk: true }; labels.push(walkMarker._zr); layout();
 }
 
 function updateStatus() {
