@@ -17,20 +17,33 @@ function nose() {
   return g;
 }
 
-export function buildTrain() {
-  const train = new THREE.Group(), mid = 62, cars = 3, cl = mid / cars, base = .9;
-  for (let i = 0; i < cars; i++) {
-    const y = -mid / 2 + cl * (i + .5);
-    train.add(box(2.9, cl - .35, 3.2, M.white, 0, y, base));
-    train.add(box(2.96, cl - 4, .95, M.dark, 0, y, base + 1.75));       // Fensterband
-    train.add(box(3.0, cl - .35, .42, M.red, 0, y, base + .95));        // roter Streifen
-    train.add(box(2.4, cl - 1.5, .22, M.roof, 0, y, base + 3.2));       // Dach
-    train.add(box(2.5, cl - 2, .8, M.skirt, 0, y, 0));                  // Fahrwerk
+// Doppelstockzug: Lok in Betreiberfarbe vorn, drei Doppelstockwagen mit zwei Fensterbändern, Steuerwagen hinten
+function buildDouble() {
+  const train = new THREE.Group(), base = .9, H = 4.4;
+  // Lok (19 m)
+  const ly = 37 - 9.5;
+  train.add(box(3.0, 17, 3.6, M.red, 0, ly - 1, base));
+  train.add(box(3.04, 3, 1.1, M.dark, 0, ly + 6.8, base + 2.2));      // Führerstand
+  train.add(box(3.06, 15, .35, M.white, 0, ly - 1.5, base + 1.2));     // Zierstreifen
+  train.add(box(2.2, 13, .5, M.skirt, 0, ly - 1, base + 3.6));         // Dachaufbauten
+  const ln = nose(); ln.scale.set(1.03, .5, 1.12); ln.position.set(0, ly + 7.5, base); train.add(ln);
+  train.add(box(2.5, 17, .8, M.skirt, 0, ly - 1, 0));
+  // Doppelstockwagen
+  const cl = 17.8;
+  for (let i = 0; i < 3; i++) {
+    const y = ly - 10.5 - cl * (i + .5);
+    train.add(box(2.9, cl - .5, H, M.white, 0, y, base));
+    train.add(box(2.96, cl - 3, .8, M.dark, 0, y, base + .75));          // unteres Fensterband
+    train.add(box(2.96, cl - 3, .8, M.dark, 0, y, base + 2.55));         // oberes Fensterband
+    train.add(box(3.0, cl - .5, .3, M.red, 0, y, base + 1.9));           // Streifen zwischen den Etagen
+    train.add(box(2.5, cl - .5, .26, M.roof, 0, y, base + H));
+    train.add(box(2.5, cl - 2, .8, M.skirt, 0, y, 0));
   }
-  const front = nose(); front.position.set(0, mid / 2, base); train.add(front);
-  const rear = nose(); rear.rotation.z = Math.PI; rear.position.set(0, -mid / 2, base); train.add(rear);
+  const rear = nose(); rear.rotation.z = Math.PI; rear.scale.set(1, .7, 1.35); rear.position.set(0, -37 + 3.4, base); train.add(rear);
   return train;
 }
+
+export const buildTrain = buildDouble;
 
 /** Benutzerdefinierte MapLibre-Ebene: ein 3D-Zug an einer Position, in Fahrtrichtung gedreht. */
 const LIVERY = { db: 0xec0016, arverio: 0x0b5fb3, other: 0x6e6e73 };
