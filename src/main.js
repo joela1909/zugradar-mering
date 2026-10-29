@@ -4,7 +4,7 @@ import './style.css';
 import * as api from './api.js';
 import { prepare, positionAt } from './train.js';
 import { expectedDelay, record, histKey } from './predict.js';
-import { dist, splitRoute, bearing as bearingTo, appendSeg } from './geo.js';
+import { dist, splitRoute, bearing as bearingTo, appendSeg, pointAt } from './geo.js';
 import { createTrainLayer } from './train3d.js';
 import { createGpsFilter } from './gps.js';
 import { ICON } from './icons.js';
@@ -718,9 +718,31 @@ function frame(now) {
     const settled = Math.abs(T.center[0] - c.lng) < 2e-7 && Math.abs(T.center[1] - c.lat) < 2e-7 && Math.abs(T.zoom - z) < .002 && Math.abs(db) < .05 && Math.abs(T.pitch - p) < .05;
     if (!settled) { navJumping = true; map.jumpTo({ center: [c.lng + (T.center[0] - c.lng) * k, c.lat + (T.center[1] - c.lat) * k], zoom: z + (T.zoom - z) * k, bearing: b + db * k, pitch: p + (T.pitch - p) * k }); navJumping = false; }
   }
+  moveTrain(dt);
   requestAnimationFrame(frame);
 }
 let navJumping = false;
+// Zug flüssig bewegen: Position bei jedem Bild aus dem Fahrplan entlang der Gleislinie; ändern neue Daten die Position,
+// gleitet der Zug dorthin (statt zu springen). Neu gezeichnet wird nur, wenn er sich auf dem Bildschirm sichtbar bewegt.
+let trainD = null, trainLine = null, drawnD = null;
+function moveTrain(dt) {
+  const tr = S.tr;
+  if (!tr?.cum || (document.hidden && !S.nav)) return;
+  const total = tr.cum[tr.cum.length - 1], p = positionAt(tr, new Date()), target = p.dist ?? p.progress * total;
+  const fresh = trainD == null || trainLine !== tr.polyline;
+  trainD = fresh || Math.abs(target - trainD) > 1500 ? target : trainD + (target - trainD) * (1 - Math.exp(-dt / 0.8));
+  trainLine = tr.polyline;
+  const mpp = 40075016.686 * Math.cos(tr.polyline[0][1] * Math.PI / 180) / (512 * 2 ** map.getZoom());
+  if (!fresh && drawnD != null && Math.abs(trainD - drawnD) / mpp < 0.3) return;
+  drawnD = trainD;
+  const pos = pointAt(tr.polyline, tr.cum, trainD), brg = bearingTo(pointAt(tr.polyline, tr.cum, trainD - 25), pointAt(tr.polyline, tr.cum, trainD + 25));
+  S.trainPos = pos;
+  train3d.state.lonlat = pos; train3d.state.bearing = brg;
+  S.trainLabel?.setLngLat(pos);
+  const it = labels.find(l => l.trainLabel); if (it) it.ll = pos;
+  S.railF = trainD / total; setRailProgress(S.railF);
+  map.triggerRepaint();
+}
 requestAnimationFrame(frame);
 async function startNav() {
   S.nav = true; S.follow = true; document.body.classList.add('nav');
@@ -787,21 +809,19 @@ map.on('zoom', syncTrainLook);
 function tick() {
   if (document.hidden && !S.nav) return; // Akku schonen, wenn die Seite nicht sichtbar ist
   if (!S.tr) { S.trainMarker?.remove(); S.trainMarker = null; S.trainLabel?.remove(); S.trainLabel = null; S.trainPos = null; return; }
-  const now = new Date(), p = positionAt(S.tr, now);
-  const live = S.live && S.tr.raw.currentLocation && p.state === 'fährt';
-  const pos = live ? S.tr.raw.currentLocation : p.pos;
-  S.trainPos = pos;
+  const pos = S.trainPos || positionAt(S.tr, new Date()).pos; // Position selbst setzt moveTrain bei jedem Bild
   // schmal halten: Betreiberkürzel weglassen (die Farbe zeigt den Betreiber), „ARV RE89“ → „RE89“
   const d = S.tr.dep.delay ?? 0, ns = nextStop(), line = S.tr.dep.line.replace(/^[A-Za-z]{2,4}\s+(?=[A-Z]{1,3}\s?\d)/, '');
   const html = `${line}${d >= 1 ? ` <b>+${Math.round(d)}</b>` : ''}${ns ? `<small>${fmt(ns.arr || ns.dep)} ${shortName(ns.name)}</small>` : ''}`;
   if (!S.trainMarker) S.trainMarker = new maplibregl.Marker({ element: el('trainmodel', TRAIN_SVG), anchor: 'center', rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat(pos).addTo(map);
-  S.trainMarker.setLngLat(pos).setRotation(p.bearing || 0);
+  S.trainMarker.setLngLat(pos);
   const lv = livery(S.tr.dep); train3d.setLivery(lv);
-  train3d.state.lonlat = pos; train3d.state.bearing = p.bearing || 0; syncTrainLook();
+  if (!train3d.state.lonlat) train3d.state.lonlat = pos;
+  syncTrainLook();
   if (!S.trainLabel) { S.trainLabel = mk(el('lbl train-l', html), pos); labels.push({ marker: S.trainLabel, ll: pos, prio: 0, essential: true, trainLabel: true }); S.trainLabel.getElement().style.zIndex = 6; }
-  const it = labels.find(l => l.trainLabel); if (it) it.ll = pos;
-  S.trainLabel.setLngLat(pos); S.trainLabel.getElement().innerHTML = html; S.trainLabel.getElement().dataset.livery = lv;
-  S.railF = p.progress; setRailProgress(p.progress); markStationBuffer();
+  if (S.trainLabel.getElement().innerHTML !== html) S.trainLabel.getElement().innerHTML = html;
+  S.trainLabel.getElement().dataset.livery = lv;
+  markStationBuffer();
   scheduleLayout(); fillProg();
   if (S.nav && S.follow && ++navTicks % 2 === 0) updateNav();
 }
