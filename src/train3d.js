@@ -26,55 +26,68 @@ function profile(pts, m, w = W) {
 }
 const lamp = () => mat(0xfff3c4, { emissive: 0xfff3c4, emissiveIntensity: .9 });
 
-// Helle Welle auf beiden Seiten: Band, das entlang des Wagens auf und ab schwingt und an den Enden spitz ausläuft
-function wave(y0, L, zMid, amp, thick, phase, g) {
-  const top = [], bot = [], n = 24;
+// Stückweise lineare Kurve: pts = [[t, wert], …] mit t von 0 (vorderes Ende) bis 1
+const lerp = pts => t => { let i = 1; while (i < pts.length - 1 && pts[i][0] < t) i++; const [t0, a] = pts[i - 1], [t1, b] = pts[i]; return a + (b - a) * Math.min(1, Math.max(0, (t - t0) / ((t1 - t0) || 1))); };
+// Helle Welle auf beiden Seiten: Mittellinie zc(t) und Dicke h(t) entlang des Wagens (y0 = vorderes Ende, Länge L)
+function wave(y0, L, zc, h, g, flip = false) {
+  const top = [], bot = [], n = 40;
   for (let i = 0; i <= n; i++) {
-    const t = i / n, y = y0 - t * L, zc = zMid + amp * Math.sin(Math.PI * 2 * t * .9 + phase), h = thick * Math.pow(Math.sin(Math.PI * Math.min(1, t * 1.15)), .6) + .04;
-    top.push([y, zc + h / 2]); bot.unshift([y, zc - h / 2]);
+    const t = i / n, u = flip ? 1 - t : t, y = y0 - t * L, z = zc(u), d = h(u) / 2;
+    top.push([y, z + d]); bot.unshift([y, z - d]);
   }
   g.add(profile([...top, ...bot], M.wave, W + .05));
 }
-// Fensterreihe aus Einzelfenstern zwischen yA (vorn) und yB (hinten), liegt über der Welle
-function windows(yA, yB, z, h, g, w = 1.7, step = 2.25) {
-  for (let y = yA - w / 2 - .3; y - w / 2 > yB + .2; y -= step) g.add(box(W + .1, w, h, M.dark, 0, y, z));
+// Fenster (dunkel, liegt über der Welle): Mitte y, Länge l, Unterkante z, Höhe hh
+const win = (y, l, z, hh, g) => g.add(box(W + .1, l, hh, M.dark, 0, y, z));
+// Doppeltür mit zwei Türfenstern
+function doors(y, z0, g) {
+  g.add(box(W + .07, 1.6, 2.1, M.door, 0, y, z0));
+  for (const s of [-1, 1]) win(y + s * .38, .42, z0 + .85, .95, g);
 }
-function doors(y, z0, g) { g.add(box(W + .07, 1.5, 2.05, M.door, 0, y, z0)); g.add(box(W + .09, .06, 1.7, M.skirt, 0, y, z0 + .2)); }
 function bogies(y0, L, g) { for (const s of [1, -1]) g.add(box(2.3, 2.8, .8, M.skirt, 0, y0 - L / 2 + s * (L / 2 - 2.4), 0)); }
 
-// Doppelstock-Mittelwagen: hoher Kasten, zwei Fensterreihen, Türen im abgesenkten Teil
+// Doppelstock-Mittelwagen (wie am Vorbild): Fenster über den Drehgestellen, Türen, oben 4 große Fenster + Schlitze, unten 4 Fenster
 function deckCar(y0, L, g) {
+  const at = t => y0 - t * L;
   g.add(hull(L, M.red, y0, W, .55, 4.6, .7));
   g.add(box(W - 1.3, L - .6, .2, M.roof, 0, y0 - L / 2, 4.5));                        // dunkles Dach
-  const dA = y0 - 5.4, dB = y0 - L + 5.4;                                             // Türen
-  windows(y0 - 6.4, y0 - L + 6.4, 3.05, .8, g);                                       // obere Etage
-  windows(dA - 1, dB + 1, 1.15, .8, g);                                               // untere Etage zwischen den Türen
-  windows(y0 - .6, dA + 1, 2.15, .8, g, 2.4, 3); windows(dB - 1, y0 - L + .6, 2.15, .8, g, 2.4, 3); // über den Drehgestellen
-  wave(y0 - 1, L - 2, 2.25, .55, 1.0, .4, g);
-  for (const yd of [dA, dB]) doors(yd, .55, g);
+  wave(y0, L, lerp([[0, 1.1], [.25, 1.75], [.33, 2.2], [.55, 2.65], [.72, 2.05], [.8, 1.65], [1, 2.0]]),
+    lerp([[0, .3], [.18, .8], [.33, .6], [.5, .95], [.72, .7], [.88, .55], [1, .18]]), g);
+  for (const t of [.12, .88]) win(at(t), 1.5, 2.05, .75, g);                         // Fenster über den Drehgestellen
+  for (const t of [.235, .765]) win(at(t), 1.5, 3.6, .25, g);                        // schmale Schlitze oben
+  for (const t of [.355, .45, .545, .64]) { win(at(t), 2.05, 3.05, .78, g); win(at(t), 2.05, 1.1, .78, g); } // obere und untere Etage
+  for (const t of [.29, .71]) doors(at(t), .55, g);
   bogies(y0, L, g);
 }
-// Endwagen (einstöckig, hoch) mit Desiro-Nase; dir = 1 vorn, −1 hinten
+// Endwagen mit runder Desiro-Nase; dir = 1 vorn (Nase vorn), −1 hinten (Nase hinten)
 function endCar(yFace, L, dir, g) {
-  const nose = 3.6, body = L - nose, y0 = yFace - nose;                               // vorn: Übergang Nase/Wagenkasten
-  const yb = dir > 0 ? y0 : yFace + nose + body;                                       // vorderes Ende des Kastens
+  const nose = 4.8, body = L - nose;
+  const yb = dir > 0 ? yFace - nose : yFace + L;                                       // vorderes Ende des Wagenkastens
+  const at = t => (dir > 0 ? yb - t * body : yb - (1 - t) * body);                     // t = 0 an der Nase
   g.add(hull(body, M.red, yb, W, .95, 4.25, .75));
   g.add(box(W - 1.3, body - 1, .2, M.roof, 0, yb - body / 2, 4.15));
-  windows(yb - 1, yb - body + 1, 2.15, .85, g, 2.2, 2.9);                             // Fenster
-  wave(yb - .5, body - 1, 1.95, .45, .85, dir > 0 ? 2.2 : 0, g);
-  for (const s of [1, -1]) doors(yb - body / 2 + s * (body / 2 - 6), .95, g);
+  wave(yb, body, lerp([[0, 1.95], [.15, 1.35], [.3, 1.4], [.5, 1.8], [.62, 2.0], [.72, 1.8], [.85, 2.1], [1, 2.4]]),
+    lerp([[0, .15], [.1, .62], [.3, .65], [.5, .85], [.65, .68], [.85, .6], [1, .25]]), g, dir < 0);
+  for (const t of [.07, .5, .82, .93]) win(at(t), 1.9, 2.05, .8, g);
+  win(at(.33), .8, 2.15, .6, g);                                                       // kleines Fenster (Rollstuhlplatz)
+  for (const t of [.2, .68]) doors(at(t), .95, g);
   bogies(yb, body, g);
-  // Nase: Seitenprofil, in der Draufsicht durch eine schmalere, längere Mittelschicht gerundet
-  const P = (k, w) => { const m = profile([[0, .45], [2.4 * k, .45], [3.25 * k, .95], [3.55 * k, 1.6], [3.35 * k, 2.5], [2.6 * k, 3.45], [1.4 * k, 4.05], [0, 4.25]], M.red, w); return m; };
-  const tip = new THREE.Group(); tip.add(P(.86, W), P(1, W * .62));
-  const glass = new THREE.Group();
-  glass.add(profile([[3.42, 2.05], [3.32, 2.6], [2.62, 3.5], [1.6, 4.04], [1.2, 3.85], [2.2, 3.3], [2.9, 2.5], [3.0, 2.05]], M.dark, W * .64));
-  glass.add(profile([[2.95, 2.0], [2.85, 2.5], [2.2, 3.4], [1.3, 3.95], [1.0, 3.75], [2.0, 3.2], [2.6, 2.4], [2.6, 2.0]], M.dark, W + .02));
-  tip.add(glass);
-  for (const s of [-1, 1]) { const l = box(.42, .12, .2, lamp(), 0, 0, 0); l.position.set(s * .62, 3.38, 1.05); tip.add(l); }
-  tip.add(box(1.4, .5, .35, M.skirt, 0, 3.0, .25));                                  // Kupplung/Schürze
+  // Nase: gewölbtes Seitenprofil (Dach läuft in weitem Bogen zur Front), in der Draufsicht durch schmalere Schichten gerundet
+  const curve = (k, dz = 0) => {
+    const pts = [];
+    for (let i = 0; i <= 12; i++) { const s = i / 12, y = 2 * (1 - s) * s * 3.4 + s * s * 4.7, z = (1 - s) * (1 - s) * 4.25 + 2 * (1 - s) * s * 4.25 + s * s * 1.7; pts.push([y * k, z + dz]); }
+    return pts;
+  };
+  const P = (k, w) => profile([[0, .45], [4.3 * k, .45], [4.75 * k, .7], [4.85 * k, 1.2], ...curve(k).reverse(), [0, 4.25]], M.red, w);
+  const tip = new THREE.Group(); tip.add(P(.8, W), P(.92, W * .8), P(1, W * .5));
+  // Frontscheibe nach vorn (auf der Wölbung, zwischen 2,2 und 3,7 m Höhe) und kleines Seitenfenster am Führerstand
+  const c = curve(1.02).filter(([, z]) => z > 2.2 && z < 3.7);
+  tip.add(profile([...c, ...c.slice().reverse().map(([y, z]) => [y - .7, z])], M.dark, W * .62));
+  tip.add(box(W + .06, .75, .6, M.dark, 0, 1.2, 2.55));
+  for (const s of [-1, 1]) { const l = box(.36, .12, .18, lamp(), 0, 0, 0); l.position.set(s * .45, 4.82, 1.0); tip.add(l); }
+  tip.add(box(1.2, .5, .35, M.skirt, 0, 4.6, .2));                                     // Kupplung
   if (dir < 0) tip.rotation.z = Math.PI;
-  tip.position.y = dir > 0 ? y0 : yb - body; g.add(tip);
+  tip.position.y = dir > 0 ? yb : yb - body; g.add(tip);
 }
 
 function buildDesiro() {
