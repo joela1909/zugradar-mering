@@ -39,3 +39,14 @@ test('glätten: Endpunkte bleiben, Zacken verschwinden, Kurven bleiben nah', () 
   const sa = smoothPath(arc); const d = Math.max(...sa.map(p => Math.min(...arc.map(q => meters(p, q)))));
   assert.ok(d < 15, 'Kurve weicht < 15 m ab: ' + d.toFixed(1));
 });
+import { buildGraphFromLines } from './rail.js';
+test('Linien aus Kacheln: Nähte an Kachelgrenzen werden verbunden', () => {
+  // Gleis über zwei Kacheln, an der Grenze 2 m Lücke; dazu ein Abzweig
+  const left = [[10.000, 48], [10.005, 48], [10.0099, 48]], right = [[10.009925, 48.00001], [10.015, 48], [10.02, 48]];
+  const branch = [[10.005, 48], [10.005, 48.01]];
+  const g = buildGraphFromLines([left, right, branch]);
+  const p = shortestPath(g, [10.0001, 48], [10.0199, 48]);
+  assert.ok(p && p.length >= 5); assert.deepEqual(p.at(-1), [10.02, 48]);
+  const q = shortestPath(g, [10.0001, 48], [10.005, 48.0099]); assert.ok(q);   // über den Abzweig
+  assert.equal(shortestPath(buildGraphFromLines([left, [[10.012, 48], [10.02, 48]]]), [10, 48], [10.02, 48]), null); // 160 m Lücke: nicht verbunden
+});

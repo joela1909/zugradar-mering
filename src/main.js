@@ -90,6 +90,15 @@ function add3D() {
     map.setLight({ anchor: 'viewport', color: '#ffffff', intensity: 0.32, position: [1.25, 210, 55] });
   } catch (e) { console.warn('3D-Gebäude nicht verfügbar', e); }
 }
+// Kachel-Adresse der Grundkarte an die Gleissuche weitergeben
+function shareTileTemplate() {
+  try {
+    const id = Object.entries(map.getStyle().sources).find(([, v]) => v.type === 'vector')?.[0];
+    const t = id && map.getSource(id)?.tiles?.[0];
+    if (t) { api.setTileTemplate(t); map.off('sourcedata', shareTileTemplate); }
+  } catch {}
+}
+map.on('sourcedata', shareTileTemplate);
 async function ensureLayers() {
   await mapReady;
   if (map.getSource('rail')) return;

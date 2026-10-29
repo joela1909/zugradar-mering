@@ -1,4 +1,5 @@
 import { buildGraph, shortestPath, smoothPath, overpassQuery } from '../rail.js';
+import { railFromTiles } from './tilerail.js';
 const BASE = '/api';
 const j = async (u, o) => {
   const r = await fetch(u, o);
@@ -105,11 +106,22 @@ async function overpassFetch(query) {
   }
   return null;
 }
+// Kachel-Adresse der Grundkarte (wird gesetzt, sobald die Karte geladen ist)
+let tileTemplate = null, tileReady;
+const tileWait = new Promise(r => (tileReady = r));
+export function setTileTemplate(t) { if (t && !tileTemplate) { tileTemplate = t; tileReady(t); } }
+
 export async function rail(a, b, aLL, bLL) {
-  const k = `zr.rail.v2.${a}.${b}`;
+  const k = `zr.rail.v3.${a}.${b}`;
   try { const c = JSON.parse(localStorage.getItem(k)); if (c && (c.c || Date.now() - c.t < 864e5)) return c.c; } catch {}
   if (!aLL || !bLL) return null;
   const job = overpassQueue.then(async () => {
+    // 1. Gleise aus den Kartenkacheln (gleiche OSM-Daten, die die Karte ohnehin lädt)
+    const tpl = tileTemplate || await Promise.race([tileWait, pause(5000)]);
+    if (tpl) {
+      try { const c = await railFromTiles(tpl, aLL, bLL); if (c) return c.map(([x, y]) => [+x.toFixed(6), +y.toFixed(6)]); } catch {}
+    }
+    // 2. Reserve: Overpass
     const data = await overpassFetch(overpassQuery(aLL, bLL, 0.012));
     if (!data) return undefined; // nicht erreichbar: nichts merken, später neu versuchen
     const path = shortestPath(buildGraph(data.elements), aLL, bLL);

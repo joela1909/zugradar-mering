@@ -83,3 +83,35 @@ export function smoothPath(coords, radius = 30, step = 10) {
   out.push(rs[rs.length - 1]);
   return thin(out, 8);
 }
+
+/**
+ * Gleisgraph aus Linien (z. B. aus Vektorkacheln). Gleiche Punkte werden zusammengeführt; Linienenden werden mit
+ * dem nächsten Punkt einer anderen Linie im Umkreis von `stitch` Metern verbunden (Kachelgrenzen, Abzweige).
+ */
+export function buildGraphFromLines(lines, stitch = 6) {
+  const pos = new Map(), adj = new Map(), lineOf = new Map(), ends = [];
+  const key = p => p[0].toFixed(6) + ',' + p[1].toFixed(6);
+  const link = (a, b, w) => { (adj.get(a) || adj.set(a, []).get(a)).push({ to: b, w }); };
+  lines.forEach((ln, li) => {
+    let prev = null;
+    ln.forEach((p, i) => {
+      const id = key(p);
+      if (!pos.has(id)) { pos.set(id, p); lineOf.set(id, li); }
+      if (prev && prev !== id) { const w = meters(pos.get(prev), p); link(prev, id, w); link(id, prev, w); }
+      prev = id;
+      if (i === 0 || i === ln.length - 1) ends.push([id, li]);
+    });
+  });
+  const C = 0.0001, cell = p => Math.floor(p[0] / C) + ':' + Math.floor(p[1] / C), grid = new Map();
+  for (const [id, p] of pos) { const k = cell(p); (grid.get(k) || grid.set(k, []).get(k)).push(id); }
+  for (const [id, li] of ends) {
+    const p = pos.get(id), cx = Math.floor(p[0] / C), cy = Math.floor(p[1] / C);
+    let best = null, bd = stitch;
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (const o of grid.get((cx + dx) + ':' + (cy + dy)) || []) {
+      if (o === id || lineOf.get(o) === li) continue;
+      const d = meters(p, pos.get(o)); if (d < bd) { bd = d; best = o; }
+    }
+    if (best) { link(id, best, bd); link(best, id, bd); }
+  }
+  return { pos, adj };
+}
