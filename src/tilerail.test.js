@@ -28,3 +28,12 @@ test('lange Abschnitte: gröbere Kachelstufe, Bereich deckt den Gleisbogen ab', 
   const kurz = pickTiles([10.943376, 48.352977], [10.959553, 48.300922]);
   assert.equal(kurz[0].z, 14);
 });
+test('Bahnhofsgleise als Nebengleis: zweiter Versuch mit allen Gleisen', () => {
+  const fc = { type: 'FeatureCollection', features: [
+    { type: 'Feature', properties: { class: 'rail', service: 'yard' }, geometry: { type: 'LineString', coordinates: [[10.94, 48.35], [10.95, 48.34]] } },
+  ] };
+  const [{ z, x, y }] = tilesFor([10.945, 48.345], [10.945, 48.345], 0);
+  const buf = vtpbf.fromGeojsonVt({ transportation: new geojsonvt(fc, { maxZoom: 14, buffer: 64 }).getTile(z, x, y) });
+  assert.equal(railLinesFromTile(buf, { z, x, y }).length, 0);
+  assert.equal(railLinesFromTile(buf, { z, x, y }, true).length, 1);
+});

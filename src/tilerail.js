@@ -16,13 +16,13 @@ export function tilesFor(a, b, pad = 0.006, z = Z) {
 }
 
 /** Gleislinien (Hauptgleise, ohne Abstell-/Rangiergleise) aus einer Kachel, als [[lon,lat], …] */
-export function railLinesFromTile(buf, { x, y, z }) {
+export function railLinesFromTile(buf, { x, y, z }, all = false) {
   const layer = new VectorTile(new Pbf(buf)).layers.transportation;
   if (!layer) return [];
   const out = [];
   for (let i = 0; i < layer.length; i++) {
     const f = layer.feature(i), p = f.properties;
-    if (p.class !== 'rail' || /yard|siding|spur|crossover/.test(p.service || '')) continue;
+    if (p.class !== 'rail' || (!all && /yard|siding|spur|crossover/.test(p.service || ''))) continue;
     const g = f.toGeoJSON(x, y, z).geometry;
     if (g.type === 'LineString') out.push(g.coordinates);
     else if (g.type === 'MultiLineString') out.push(...g.coordinates);
@@ -46,7 +46,11 @@ export async function railFromTiles(template, a, b) {
   if (!tiles) return null;
   const bufs = await Promise.all(tiles.map(t => fetch(template.replace('{z}', t.z).replace('{x}', t.x).replace('{y}', t.y)).then(r => (r.ok ? r.arrayBuffer() : null)).catch(() => null)));
   if (bufs.every(x => !x)) throw new Error('Kacheln nicht erreichbar');
-  const lines = bufs.flatMap((buf, i) => (buf ? railLinesFromTile(new Uint8Array(buf), tiles[i]) : []));
-  const path = shortestPath(buildGraphFromLines(lines), a, b, 400);
-  return path ? smoothPath(path) : null;
+  // erst nur Hauptgleise; findet sich kein Weg (z. B. Bahnsteiggleise im Hbf als Nebengleis eingetragen), mit allen Gleisen
+  for (const all of [false, true]) {
+    const lines = bufs.flatMap((buf, i) => (buf ? railLinesFromTile(new Uint8Array(buf), tiles[i], all) : []));
+    const path = shortestPath(buildGraphFromLines(lines), a, b, 400);
+    if (path) return smoothPath(path);
+  }
+  return null;
 }

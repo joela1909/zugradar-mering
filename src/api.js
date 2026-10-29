@@ -114,7 +114,7 @@ export function setTileTemplate(t) { if (t && !tileTemplate) { tileTemplate = t;
 /** Herkunft der Gleisabschnitte (für die Anzeige im großen Blatt) */
 export const railStats = { cache: 0, tiles: 0, overpass: 0, none: 0, fail: 0 };
 export async function rail(a, b, aLL, bLL) {
-  const k = `zr.rail.v4.${a}.${b}`;
+  const k = `zr.rail.v5.${a}.${b}`;
   try { const c = JSON.parse(localStorage.getItem(k)); if (c && (c.c || Date.now() - c.t < 864e5)) { railStats[c.c ? 'cache' : 'none']++; return c.c; } } catch {}
   if (!aLL || !bLL) return null;
   const job = overpassQueue.then(async () => {
@@ -126,7 +126,8 @@ export async function rail(a, b, aLL, bLL) {
     // 2. Reserve: Overpass
     const data = await overpassFetch(overpassQuery(aLL, bLL, 0.012));
     if (!data) { railStats.fail++; return undefined; } // nicht erreichbar: nichts merken, später neu versuchen
-    const path = shortestPath(buildGraph(data.elements), aLL, bLL);
+    const main = (data.elements || []).filter(e => !/yard|siding|spur|crossover/.test(e.tags?.service || ''));
+    const path = shortestPath(buildGraph(main), aLL, bLL) || shortestPath(buildGraph(data.elements), aLL, bLL);
     railStats[path ? 'overpass' : 'none']++;
     return path ? smoothPath(path).map(([x, y]) => [+x.toFixed(6), +y.toFixed(6)]) : null;
   });

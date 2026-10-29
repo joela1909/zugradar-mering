@@ -733,6 +733,6 @@ $('fit').onclick = () => { S.fitFull = !S.fitFull; $('fit').title = S.fitFull ? 
 if (S.track) navigator.permissions?.query({ name: 'geolocation' }).then(r => { if (r.state === 'granted') startTracking(); }).catch(() => {});
 if (location.hash === '#debug') Object.assign(window, { __map: map, __S: S, __t3d: train3d, __layout: layout });
 setInterval(tick, 1000);
-// alle 10 s: der Worker teilt die 60 Bahn-Abfragen pro Minute auf und liefert sonst den letzten Stand
-setInterval(() => { if (!document.hidden) refresh().then(logObservation); }, 10000);
+// alle 8 s: fragt mehr an, als das Bahn-Kontingent hergibt; der Worker schöpft die 60 pro Minute aus und liefert sonst den letzten Stand
+setInterval(() => { if (!document.hidden) refresh().then(logObservation); }, 8000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });

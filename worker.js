@@ -77,10 +77,10 @@ async function db(env, path, fresh) {
   return text;
 }
 
-// Frische: Bahnhöfe 1 Tag, Fahrpläne 10 min, Echtzeit-Änderungen so oft das Kontingent es erlaubt (frühestens alle 10 s)
+// Frische: Bahnhöfe 1 Tag, Fahrpläne 10 min, Echtzeit-Änderungen bei jeder Anfrage, solange das Kontingent reicht
 const station = async (env, pattern) => parseStations(await db(env, '/station/' + encodeURIComponent(pattern), 86400));
 const plan = async (env, eva, date) => parseTimetable(await db(env, `/plan/${eva}/${planPath(date)}`, 600));
-const changes = async (env, eva) => parseTimetable(await db(env, `/fchg/${eva}`, 10).catch(() => '<timetable/>'));
+const changes = async (env, eva) => parseTimetable(await db(env, `/fchg/${eva}`, 0).catch(() => '<timetable/>'));
 
 
 // Koordinaten aus den Stationsdaten der Bahn (EVA bzw. Name), sonst Ortssuche

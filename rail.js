@@ -63,7 +63,7 @@ export function thin(coords, minGap = 8) {
 export function overpassQuery(a, b, pad = 0.03) {
   const s = Math.min(a[1], b[1]) - pad, n = Math.max(a[1], b[1]) + pad, w = Math.min(a[0], b[0]) - pad, e = Math.max(a[0], b[0]) + pad;
   const f = x => x.toFixed(5);
-  return `[out:json][timeout:25];way["railway"="rail"]["service"!~"yard|siding|spur|crossover"](${f(s)},${f(w)},${f(n)},${f(e)});out geom qt;`;
+  return `[out:json][timeout:25];way["railway"="rail"](${f(s)},${f(w)},${f(n)},${f(e)});out geom qt;`;
 }
 
 /** Glättet einen Gleisweg (gleitender Mittelwert über ±`radius` m), damit Gleiswechsel keine Zacken erzeugen. */
