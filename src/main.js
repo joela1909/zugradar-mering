@@ -333,20 +333,25 @@ function buildLine(st, segs) {
 }
 // Gleisverlauf eines Abschnitts (vom Gleis am Start- bis zum Gleis am Zielbahnhof): fest hinterlegt, sonst aus den Kacheln; lange Abschnitte ohne Halt
 // werden an den dazwischenliegenden Bahnhöfen geteilt (jedes Teilstück einzeln geladen und gemerkt)
-async function segmentCoords(a, b) {
+async function segmentCoords(a, b, onPart) {
   const fixed = corridorSegment(a.id, b.id); if (fixed) return fixed;
   const via = viaStations(a.id, b.id);
-  if (!via) return api.rail(a.id, b.id, a.lonlat, b.lonlat);
+  if (!via) return api.rail(a.id, b.id, a.lonlat, b.lonlat, `${shortName(a.name)} → ${shortName(b.name)}`);
   via[0] = { ...via[0], ll: a.lonlat }; via[via.length - 1] = { ...via.at(-1), ll: b.lonlat };
-  const parts = await Promise.all(via.slice(0, -1).map((p, k) => corridorSegment(p.eva, via[k + 1].eva) || api.rail(p.eva, via[k + 1].eva, p.ll, via[k + 1].ll)));
-  if (!parts.some(Boolean)) return null;
-  const out = [];
-  via.slice(0, -1).forEach((p, k) => {
-    const seg = parts[k] && parts[k].length > 1 ? parts[k] : [p.ll, via[k + 1].ll];
-    const last = out[out.length - 1];
-    out.push(...(last && dist(last, seg[0]) < 0.5 ? seg.slice(1) : seg));
-  });
-  return out;
+  const parts = via.slice(0, -1).map((p, k) => corridorSegment(p.eva, via[k + 1].eva));
+  const combine = () => {
+    const out = [];
+    via.slice(0, -1).forEach((p, k) => {
+      const seg = parts[k] && parts[k].length > 1 ? parts[k] : [p.ll, via[k + 1].ll];
+      const last = out[out.length - 1];
+      out.push(...(last && dist(last, seg[0]) < 0.5 ? seg.slice(1) : seg));
+    });
+    return out;
+  };
+  if (parts.some(Boolean)) onPart?.(combine());
+  // jedes fertige Teilstück sofort zeichnen, nicht erst wenn alle da sind
+  await Promise.all(parts.map((c, k) => c || api.rail(via[k].eva, via[k + 1].eva, via[k].ll, via[k + 1].ll, `${shortName(via[k].name)} → ${shortName(via[k + 1].name)}`).then(r => { if (r) { parts[k] = r; onPart?.(combine()); } })));
+  return parts.some(Boolean) ? combine() : null;
 }
 async function refineRail(tr, tripId) {
   const st = tr.raw.stopovers;
@@ -364,7 +369,8 @@ async function refineRail(tr, tripId) {
   if (!S.live) return;
   // übrige Abschnitte aus OSM, nahe Halte zuerst; jeder fertige Abschnitt wird sofort gezeichnet
   const order = segs.map((_, i) => i).filter(i => !segs[i]).sort((x, y) => Math.abs(x - tr.stopIdx) - Math.abs(y - tr.stopIdx));
-  await Promise.all(order.map(i => segmentCoords(st[i], st[i + 1]).then(c => {
+  const partial = i => c => { segs[i] = c; clearTimeout(pending); pending = setTimeout(apply, 150); };
+  await Promise.all(order.map(i => segmentCoords(st[i], st[i + 1], partial(i)).then(c => {
     if (!c) return;
     segs[i] = c;
     clearTimeout(pending); pending = setTimeout(apply, 150);
@@ -476,7 +482,8 @@ function renderDetails(dep, p) {
 }
 function railInfo() {
   const r = api.railStats, parts = [r.tiles && `${r.tiles} aus Karte`, r.cache && `${r.cache} gespeichert`, r.overpass && `${r.overpass} Overpass`, r.none && `${r.none} ohne Gleis`, r.fail && `${r.fail} nicht erreichbar`].filter(Boolean);
-  return parts.length ? parts.join(' · ') : 'werden geladen …';
+  const probs = [...new Set(r.problems)].slice(-4).map(t => `<small class="tech">${t.replace(/</g, '&lt;')}</small>`).join('');
+  return (parts.length ? parts.join(' · ') : 'werden geladen …') + (probs ? `<span class="kvcol" style="margin-top:4px">${probs}</span>` : '');
 }
 function bindDetails() {
   const sb = $('strictbtn'); if (sb) sb.onclick = e => { e.stopPropagation(); S.strict = !S.strict; store.set('zr.strict', S.strict); S.sel = vis().some(d => d.tripId === S.sel) ? S.sel : pickDefault()?.tripId; selectTrip(S.sel, false); };

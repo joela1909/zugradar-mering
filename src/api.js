@@ -92,10 +92,13 @@ export function demo(now = new Date()) {
 const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
 let overpassQueue = Promise.resolve();
 const pause = ms => new Promise(r => setTimeout(r, ms));
+// Ist Overpass vom Handy aus nicht erreichbar, für diese Sitzung nicht mehr versuchen (sonst wartet jeder Abschnitt lange)
+let overpassDown = false;
 async function overpassFetch(query) {
+  if (overpassDown) return null;
   for (const u of OVERPASS) {
     for (let attempt = 0; attempt < 2; attempt++) {
-      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 25000);
+      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 10000);
       try {
         const r = await fetch(`${u}?data=${encodeURIComponent(query)}`, { signal: ctl.signal });
         if (r.status === 429 || r.status === 504) { await pause(4000); continue; } // ausgelastet: kurz warten, nochmal
@@ -104,6 +107,7 @@ async function overpassFetch(query) {
       } catch { break; } finally { clearTimeout(t); }
     }
   }
+  overpassDown = true;
   return null;
 }
 // Kachel-Adresse der Grundkarte (wird gesetzt, sobald die Karte geladen ist)
@@ -112,20 +116,22 @@ const tileWait = new Promise(r => (tileReady = r));
 export function setTileTemplate(t) { if (t && !tileTemplate) { tileTemplate = t; tileReady(t); } }
 
 /** Herkunft der Gleisabschnitte (für die Anzeige im großen Blatt) */
-export const railStats = { cache: 0, tiles: 0, overpass: 0, none: 0, fail: 0 };
-export async function rail(a, b, aLL, bLL) {
+export const railStats = { cache: 0, tiles: 0, overpass: 0, none: 0, fail: 0, problems: [] };
+export async function rail(a, b, aLL, bLL, label = `${a} → ${b}`) {
   const k = `zr.rail.v6.${a}.${b}`;
   try { const c = JSON.parse(localStorage.getItem(k)); if (c && (c.c || Date.now() - c.t < 864e5)) { railStats[c.c ? 'cache' : 'none']++; return c.c; } } catch {}
   if (!aLL || !bLL) return null;
   const job = overpassQueue.then(async () => {
     // 1. Gleise aus den Kartenkacheln (gleiche OSM-Daten, die die Karte ohnehin lädt)
     const tpl = tileTemplate || await Promise.race([tileWait, pause(5000)]);
+    let why = 'Karte noch nicht geladen';
     if (tpl) {
-      try { const c = await railFromTiles(tpl, aLL, bLL); if (c) { railStats.tiles++; return c.map(([x, y]) => [+x.toFixed(6), +y.toFixed(6)]); } } catch {}
+      try { const r = await railFromTiles(tpl, aLL, bLL); if (r.path) { railStats.tiles++; return r.path.map(([x, y]) => [+x.toFixed(6), +y.toFixed(6)]); } why = r.why; } catch (e) { why = 'Fehler: ' + String(e?.message || e).slice(0, 60); }
     }
+    railStats.problems.push(`${label}: Karte ${why}`);
     // 2. Reserve: Overpass
     const data = await overpassFetch(overpassQuery(aLL, bLL, 0.012));
-    if (!data) { railStats.fail++; return undefined; } // nicht erreichbar: nichts merken, später neu versuchen
+    if (!data) { railStats.fail++; railStats.problems.push(`${label}: Overpass nicht erreichbar`); return undefined; } // nichts merken, später neu versuchen
     const main = (data.elements || []).filter(e => !/yard|siding|spur|crossover/.test(e.tags?.service || ''));
     const path = shortestPath(buildGraph(main), aLL, bLL) || shortestPath(buildGraph(data.elements), aLL, bLL);
     railStats[path ? 'overpass' : 'none']++;

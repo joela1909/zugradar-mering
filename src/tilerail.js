@@ -1,7 +1,7 @@
 // Gleise direkt aus den Vektorkacheln der Grundkarte (OpenFreeMap, OpenMapTiles-Schema, Daten: OpenStreetMap)
 import { VectorTile } from '@mapbox/vector-tile';
 import { PbfReader as Pbf } from 'pbf';
-import { buildGraphFromLines, shortestPath, smoothPath } from '../rail.js';
+import { buildGraphFromLines, shortestPath, smoothPath, nearestOnEdge, meters } from '../rail.js';
 
 const Z = 14; // höchste Detailstufe der Kacheln
 const tx = (lon, z) => Math.floor((lon + 180) / 360 * 2 ** z);
@@ -40,17 +40,21 @@ export function pickTiles(a, b, max = 40) {
   return null;
 }
 
-/** Gleisweg von a nach b aus den Kacheln; null, wenn keine Verbindung gefunden wurde */
+/** Gleisweg von a nach b aus den Kacheln: { path } oder { path: null, why: Grund } */
 export async function railFromTiles(template, a, b) {
   const tiles = pickTiles(a, b);
-  if (!tiles) return null;
+  if (!tiles) return { path: null, why: 'Abschnitt zu lang' };
   const bufs = await Promise.all(tiles.map(t => fetch(template.replace('{z}', t.z).replace('{x}', t.x).replace('{y}', t.y)).then(r => (r.ok ? r.arrayBuffer() : null)).catch(() => null)));
-  if (bufs.every(x => !x)) throw new Error('Kacheln nicht erreichbar');
+  const missing = bufs.filter(x => !x).length;
+  if (missing === bufs.length) return { path: null, why: 'Kacheln nicht erreichbar' };
   // erst nur Hauptgleise; findet sich kein Weg (z. B. Bahnsteiggleise im Hbf als Nebengleis eingetragen), mit allen Gleisen
+  let why = '';
   for (const all of [false, true]) {
     const lines = bufs.flatMap((buf, i) => (buf ? railLinesFromTile(new Uint8Array(buf), tiles[i], all) : []));
-    const path = shortestPath(buildGraphFromLines(lines), a, b, 400);
-    if (path) return smoothPath(path);
+    const g = buildGraphFromLines(lines), path = shortestPath(g, a, b, 400);
+    if (path) return { path: smoothPath(path) };
+    const sa = nearestOnEdge(g, a, 1e9), sb = nearestOnEdge(g, b, 1e9), m = s => (s ? Math.round(meters(s.p, s === sa ? a : b)) + ' m' : '–');
+    why = `${tiles.length} Kacheln z${tiles[0].z}${missing ? `, ${missing} fehlen` : ''}, ${lines.length} Gleisstücke, Abstand zum Gleis ${m(sa)} / ${m(sb)}`;
   }
-  return null;
+  return { path: null, why: 'kein Weg (' + why + ')' };
 }
