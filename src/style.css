@@ -71,7 +71,7 @@ body.nav .dirctl,body.nav .status{display:none}
 .brow{display:flex;align-items:center;gap:10px;width:100%;padding:9px 10px;border-radius:16px;text-align:left;font-variant-numeric:tabular-nums}
 .brow.sel{background:var(--fill)}
 .bt{width:56px;display:flex;flex-direction:column;line-height:1.1}.bt b{font-size:17px;font-weight:700;letter-spacing:-.02em}.bt s{font-size:11px;color:var(--mute)}
-.bd{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px;font-weight:500}.bg{color:var(--mute);font-size:12px}
+.bd{flex:1;min-width:64px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px;font-weight:500;line-height:1.2}.bd small{display:block;color:var(--mute);font-size:11.5px;font-weight:400}.bg{color:var(--mute);font-size:12px;white-space:nowrap}
 .bd2{margin:10px 4px 2px;padding-top:12px;border-top:.5px solid var(--sep);display:flex;flex-direction:column;gap:9px;font-size:13.5px}
 .bd2>div{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
 .bd2>div>span:first-child{color:var(--mute);flex:none}.bd2>div>span:last-child{text-align:right}
@@ -168,4 +168,5 @@ body.nav .dirctl,body.nav .status{display:none}
 .lbl.train-l.below::after{bottom:auto;top:-4px}
 
 /* gekoppelte Züge: Linien-Badges mit Kupplungszeichen */
+.badge .cpl{font-style:normal;opacity:.75;margin:0 2px}
 .couple{color:var(--mute);font-weight:700;font-size:12px;margin:0 -4px;flex:none}

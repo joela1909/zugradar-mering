@@ -33,7 +33,13 @@ const groupOf = id => vis().find(d => parts(d).some(x => x.tripId === id));
 const shortLine = l => l.replace(/^[A-Za-z]{2,4}\s+(?=[A-Z]{1,3}\s?\d)/, '');   // „ARV RE89“ → „RE89“ (Farbe zeigt den Betreiber)
 const lineText = d => parts(d).map(x => x.line).join(' + ');
 const dirText = d => [...new Set(parts(d).map(x => x.direction))].join(' · ');
-const badges = (d, sm = '') => parts(d).map(x => `<span class="badge${sm}" data-livery="${livery(x)}">${x.line}</span>`).join('<span class="couple" title="gekoppelt">+</span>');
+// gekoppelt: kurze Linien ohne Betreiberkürzel (die Farbe zeigt den Betreiber), damit das Ziel daneben Platz hat
+const badges = (d, sm = '') => {
+  const ps = parts(d), lv = livery(d);
+  if (ps.length === 1) return `<span class="badge${sm}" data-livery="${lv}">${d.line}</span>`;
+  if (ps.every(x => livery(x) === lv)) return `<span class="badge${sm}" data-livery="${lv}" title="gekoppelt">${ps.map(x => shortLine(x.line)).join('<i class="cpl">+</i>')}</span>`; // ein Badge je Betreiber
+  return ps.map(x => `<span class="badge${sm}" data-livery="${livery(x)}">${shortLine(x.line)}</span>`).join('<span class="couple" title="gekoppelt">+</span>');
+};
 const RULE = { augsburg: 'ab München Hbf/Pasing', muenchen: 'über München-Pasing/Hbf' };
 const DIRS = { muenchen: 'München', augsburg: 'Augsburg' };
 
@@ -527,7 +533,7 @@ function renderList(list) {
     const m = d.delay ?? 0, t = d.actual || d.planned;
     return `<button class="brow ${d.tripId === S.sel ? 'sel' : ''}${d.cancelled ? ' cx' : ''}" data-id="${d.tripId}">
       <span class="bt"><b class="${d.cancelled ? 'late' : cls(m)}">${d.cancelled ? `<s>${fmt(d.planned)}</s>` : fmt(t)}</b>${m >= 1 && !d.cancelled ? `<s>${fmt(d.planned)}</s>` : ''}</span>
-      ${badges(d, ' sm')}<span class="bd">${dirText(d)}</span><span class="bg">Gl. ${d.platform}</span>
+      ${badges(d, ' sm')}<span class="bd">${dirText(d)}<small>Gl. ${d.platform}</small></span>
       <span class="chip ${d.cancelled ? 'late' : cls(m)}">${d.cancelled ? 'Ausfall' : m >= 1 ? '+' + Math.round(m) : '±0'}</span></button>`;
   }).join('');
   return `<div class="bh"><b>Nächste Verbindungen</b><span class="sub">Richtung ${DIRS[S.dir]}</span></div><div class="blist">${rows || '<div class="sub" style="padding:8px 4px">Keine weiteren Verbindungen.</div>'}</div>`;
