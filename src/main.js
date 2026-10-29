@@ -213,10 +213,15 @@ function trainBox() {
 }
 // Zug-Label schwebt mittig über dem Zug, nie auf ihm (bei jedem Bild nachgeführt)
 const LABEL_GAP = 9;
+// Normal über dem Zug; nur wenn dort Bedienelemente oder der Bildschirmrand sind, darunter (Spitze zeigt dann nach oben)
 function trainLabelRect() {
   const e = S.trainLabel?.getElement(), b = trainBox(); if (!e || !b) return null;
   const w = e.offsetWidth, h = e.offsetHeight, cx = (b.x1 + b.x2) / 2;
-  return { x1: cx - w / 2, y1: b.y1 - LABEL_GAP - h, x2: cx + w / 2, y2: b.y1 - LABEL_GAP };
+  const above = { x1: cx - w / 2, y1: b.y1 - LABEL_GAP - h, x2: cx + w / 2, y2: b.y1 - LABEL_GAP };
+  const ui = [$('dirctl'), $('status'), document.querySelector('.fabs')].filter(x => x && x.getClientRects().length).map(x => x.getBoundingClientRect());
+  const blocked = above.y1 < 6 || ui.some(u => !(above.x2 <= u.left || above.x1 >= u.right || above.y2 <= u.top || above.y1 >= u.bottom));
+  e.classList.toggle('below', blocked);
+  return blocked ? { x1: above.x1, y1: b.y2 + LABEL_GAP, x2: above.x2, y2: b.y2 + LABEL_GAP + h } : above;
 }
 function placeTrainLabel() {
   const r = trainLabelRect(); if (!r || !S.trainPos) return;
@@ -786,8 +791,9 @@ function tick() {
   const live = S.live && S.tr.raw.currentLocation && p.state === 'fährt';
   const pos = live ? S.tr.raw.currentLocation : p.pos;
   S.trainPos = pos;
-  const d = S.tr.dep.delay ?? 0, ns = nextStop();
-  const html = `${S.tr.dep.line}${d >= 1 ? ` <b>+${Math.round(d)}</b>` : ''}${ns ? `<small>→ ${shortName(ns.name)} ${fmt(ns.arr || ns.dep)}</small>` : ''}`;
+  // schmal halten: Betreiberkürzel weglassen (die Farbe zeigt den Betreiber), „ARV RE89“ → „RE89“
+  const d = S.tr.dep.delay ?? 0, ns = nextStop(), line = S.tr.dep.line.replace(/^[A-Za-z]{2,4}\s+(?=[A-Z]{1,3}\s?\d)/, '');
+  const html = `${line}${d >= 1 ? ` <b>+${Math.round(d)}</b>` : ''}${ns ? `<small>${fmt(ns.arr || ns.dep)} ${shortName(ns.name)}</small>` : ''}`;
   if (!S.trainMarker) S.trainMarker = new maplibregl.Marker({ element: el('trainmodel', TRAIN_SVG), anchor: 'center', rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat(pos).addTo(map);
   S.trainMarker.setLngLat(pos).setRotation(p.bearing || 0);
   const lv = livery(S.tr.dep); train3d.setLivery(lv);

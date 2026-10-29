@@ -161,7 +161,8 @@ body.nav .dirctl,body.nav .status{display:none}
 #sPeek.swap{animation:zr-swap .35s ease}
 @media (prefers-reduced-motion:reduce){#sPeek.upd .times,#sPeek.swap{animation:none}}
 
-/* Zug-Label schwebt als Sprechblase über dem Zug, darunter der nächste Halt */
-.lbl.train-l{font-size:12.5px;padding:4px 10px 5px;border-radius:12px;text-align:left;box-shadow:0 4px 14px rgba(0,0,0,.3)}
-.lbl.train-l small{display:block;font-weight:500;font-size:11px;opacity:.85}
-.lbl.train-l::after{content:"";position:absolute;left:50%;bottom:-5px;width:10px;height:10px;margin-left:-5px;background:inherit;transform:rotate(45deg);border-radius:2px;z-index:-1}
+/* Zug-Label: schmale Sprechblase über dem Zug, zweite Zeile nächster Halt (Zeit + Name, lange Namen gekürzt) */
+.lbl.train-l{font-size:11.5px;padding:3px 8px 4px;border-radius:10px;text-align:left;box-shadow:0 3px 10px rgba(0,0,0,.3)}
+.lbl.train-l small{display:block;font-weight:500;font-size:10px;opacity:.85;max-width:82px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lbl.train-l::after{content:"";position:absolute;left:50%;bottom:-4px;width:8px;height:8px;margin-left:-4px;background:inherit;transform:rotate(45deg);border-radius:2px;z-index:-1}
+.lbl.train-l.below::after{bottom:auto;top:-4px}
