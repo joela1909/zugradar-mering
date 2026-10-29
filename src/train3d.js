@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 
 const mat = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: .6, metalness: 0, side: THREE.DoubleSide, ...o });
-const M = { white: mat(0xf4f4f6), red: mat(0xec0016, { roughness: .4 }), dark: mat(0x1c1c1e, { roughness: .25, metalness: .4 }), roof: mat(0xc9ccd2), skirt: mat(0x3a3a3c) };
+// red = Wagenkasten in Betreiberfarbe (DB rot / Arverio blau); wave = helle Welle; door = Türen; roof = dunkles Dach
+const M = { red: mat(0xec0016, { roughness: .45 }), wave: mat(0xdfe4ea), door: mat(0xd3d8de), dark: mat(0x16181b, { roughness: .2, metalness: .4 }), roof: mat(0x2b2d31), skirt: mat(0x232427) };
 
-// Lokale Achsen: x = rechts, y = Fahrtrichtung (vorn), z = oben. Maße in Metern, angelehnt an einen Triebzug (~75 m).
+// Lokale Achsen: x = rechts, y = Fahrtrichtung (vorn), z = oben. Maße in Metern, nach Vorbild Siemens Desiro HC (BR 462, ~105 m).
 function box(w, l, h, m, x = 0, y = 0, z = 0) { const b = new THREE.Mesh(new THREE.BoxGeometry(w, l, h), m); b.position.set(x, y, z + h / 2); return b; }
 
-// ---- Doppelstockzug nach Vorbild Bombardier Twindexx Vario: Steuerwagen vorn, Mittelwagen, Lok hinten ----
+// ---- Desiro HC: zwei einstöckige Endwagen mit runder Nase, zwei Doppelstock-Mittelwagen ----
 const W = 2.8, H = 4.55, FLOOR = .95; // Wagenbreite, Dachhöhe, Wagenboden über Schiene (Enden; Mitte abgesenkt)
 const poly = pts => { const sh = new THREE.Shape(); pts.forEach(([x, y], i) => (i ? sh.lineTo(x, y) : sh.moveTo(x, y))); return sh; };
 // Querschnitt mit gewölbtem Dach, entlang der Fahrtrichtung (y) extrudiert: y0 = vorderes Ende, Länge L
@@ -25,51 +26,72 @@ function profile(pts, m, w = W) {
 }
 const lamp = () => mat(0xfff3c4, { emissive: 0xfff3c4, emissiveIntensity: .9 });
 
-// Doppelstockwagen: Enden über den Drehgestellen hoch, Mitte tiefer (zwei Etagen), Fensterbänder, Türen und Bauchbinde
+// Helle Welle auf beiden Seiten: Band, das entlang des Wagens auf und ab schwingt und an den Enden spitz ausläuft
+function wave(y0, L, zMid, amp, thick, phase, g) {
+  const top = [], bot = [], n = 24;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n, y = y0 - t * L, zc = zMid + amp * Math.sin(Math.PI * 2 * t * .9 + phase), h = thick * Math.pow(Math.sin(Math.PI * Math.min(1, t * 1.15)), .6) + .04;
+    top.push([y, zc + h / 2]); bot.unshift([y, zc - h / 2]);
+  }
+  g.add(profile([...top, ...bot], M.wave, W + .05));
+}
+// Fensterreihe aus Einzelfenstern zwischen yA (vorn) und yB (hinten), liegt über der Welle
+function windows(yA, yB, z, h, g, w = 1.7, step = 2.25) {
+  for (let y = yA - w / 2 - .3; y - w / 2 > yB + .2; y -= step) g.add(box(W + .1, w, h, M.dark, 0, y, z));
+}
+function doors(y, z0, g) { g.add(box(W + .07, 1.5, 2.05, M.door, 0, y, z0)); g.add(box(W + .09, .06, 1.7, M.skirt, 0, y, z0 + .2)); }
+function bogies(y0, L, g) { for (const s of [1, -1]) g.add(box(2.3, 2.8, .8, M.skirt, 0, y0 - L / 2 + s * (L / 2 - 2.4), 0)); }
+
+// Doppelstock-Mittelwagen: hoher Kasten, zwei Fensterreihen, Türen im abgesenkten Teil
 function deckCar(y0, L, g) {
-  const end = 4.2, midL = L - 2 * end;
-  g.add(hull(L, M.white, y0));
-  g.add(box(W - .05, midL, FLOOR - .3, M.white, 0, y0 - L / 2, .3));                 // abgesenkter Mittelteil
-  g.add(box(W + .04, midL - 1.6, .85, M.dark, 0, y0 - L / 2, .95));                  // unteres Fensterband
-  g.add(box(W + .04, L - 2.4, .85, M.dark, 0, y0 - L / 2, 2.85));                    // oberes Fensterband
-  g.add(box(W + .06, midL, .32, M.red, 0, y0 - L / 2, .35));                         // Bauchbinde
-  for (const s of [1, -1]) g.add(box(W + .08, 1.4, 2.0, M.red, 0, y0 - L / 2 + s * (midL / 2 - .9), .32)); // Türen
-  g.add(box(W - .5, L - 1, .18, M.roof, 0, y0 - L / 2, H - .02));                    // Dachstreifen
-  for (const s of [1, -1]) g.add(box(2.3, 3, .8, M.skirt, 0, y0 - L / 2 + s * (L / 2 - 2.4), 0)); // Drehgestelle
+  g.add(hull(L, M.red, y0, W, .55, 4.6, .7));
+  g.add(box(W - 1.3, L - .6, .2, M.roof, 0, y0 - L / 2, 4.5));                        // dunkles Dach
+  const dA = y0 - 5.4, dB = y0 - L + 5.4;                                             // Türen
+  windows(y0 - 6.4, y0 - L + 6.4, 3.05, .8, g);                                       // obere Etage
+  windows(dA - 1, dB + 1, 1.15, .8, g);                                               // untere Etage zwischen den Türen
+  windows(y0 - .6, dA + 1, 2.15, .8, g, 2.4, 3); windows(dB - 1, y0 - L + .6, 2.15, .8, g, 2.4, 3); // über den Drehgestellen
+  wave(y0 - 1, L - 2, 2.25, .55, 1.0, .4, g);
+  for (const yd of [dA, dB]) doors(yd, .55, g);
+  bogies(y0, L, g);
+}
+// Endwagen (einstöckig, hoch) mit Desiro-Nase; dir = 1 vorn, −1 hinten
+function endCar(yFace, L, dir, g) {
+  const nose = 3.6, body = L - nose, y0 = yFace - nose;                               // vorn: Übergang Nase/Wagenkasten
+  const yb = dir > 0 ? y0 : yFace + nose + body;                                       // vorderes Ende des Kastens
+  g.add(hull(body, M.red, yb, W, .95, 4.25, .75));
+  g.add(box(W - 1.3, body - 1, .2, M.roof, 0, yb - body / 2, 4.15));
+  windows(yb - 1, yb - body + 1, 2.15, .85, g, 2.2, 2.9);                             // Fenster
+  wave(yb - .5, body - 1, 1.95, .45, .85, dir > 0 ? 2.2 : 0, g);
+  for (const s of [1, -1]) doors(yb - body / 2 + s * (body / 2 - 6), .95, g);
+  bogies(yb, body, g);
+  // Nase: Seitenprofil, in der Draufsicht durch eine schmalere, längere Mittelschicht gerundet
+  const P = (k, w) => { const m = profile([[0, .45], [2.4 * k, .45], [3.25 * k, .95], [3.55 * k, 1.6], [3.35 * k, 2.5], [2.6 * k, 3.45], [1.4 * k, 4.05], [0, 4.25]], M.red, w); return m; };
+  const tip = new THREE.Group(); tip.add(P(.86, W), P(1, W * .62));
+  const glass = new THREE.Group();
+  glass.add(profile([[3.42, 2.05], [3.32, 2.6], [2.62, 3.5], [1.6, 4.04], [1.2, 3.85], [2.2, 3.3], [2.9, 2.5], [3.0, 2.05]], M.dark, W * .64));
+  glass.add(profile([[2.95, 2.0], [2.85, 2.5], [2.2, 3.4], [1.3, 3.95], [1.0, 3.75], [2.0, 3.2], [2.6, 2.4], [2.6, 2.0]], M.dark, W + .02));
+  tip.add(glass);
+  for (const s of [-1, 1]) { const l = box(.42, .12, .2, lamp(), 0, 0, 0); l.position.set(s * .62, 3.38, 1.05); tip.add(l); }
+  tip.add(box(1.4, .5, .35, M.skirt, 0, 3.0, .25));                                  // Kupplung/Schürze
+  if (dir < 0) tip.rotation.z = Math.PI;
+  tip.position.y = dir > 0 ? y0 : yb - body; g.add(tip);
 }
 
-function buildDouble() {
-  const g = new THREE.Group(), cab = 26.5, car = 26.5, loco = 18.5, gap = .4;
-  const front = 37; // Zugspitze bei y = +37 (Modell ~74 m)
-  // Steuerwagen: Wagenkasten + schräge, gerundete Front mit großer Scheibe oben
-  const nose = 3.1, y0 = front - nose;
-  deckCar(y0, cab - nose, g);
-  const P = [[0, .3], [2.3, .3], [2.95, .9], [3.1, 1.7], [2.95, 2.6], [2.5, 3.4], [1.7, 4.2], [.8, H], [0, H]];
-  const n = profile(P, M.white); n.position.y = y0; g.add(n);
-  // rote Front unten und große, schräge Frontscheibe – jeweils knapp vor der Nasenfläche, damit sie sichtbar sind
-  const band = profile([[0, .3], [2.36, .3], [3.02, .9], [3.17, 1.7], [3.1, 2.15], [2.4, 2.15], [2.4, .3]], M.red, W + .06); band.position.y = y0; g.add(band);
-  const shield = profile([[3.04, 2.45], [2.58, 3.42], [1.76, 4.26], [.95, 4.55], [.8, 4.3], [1.6, 3.9], [2.35, 3.2], [2.75, 2.4]], M.dark, W - .3); shield.position.y = y0; g.add(shield);
-  for (const s of [-1, 1]) { const l = box(.5, .12, .24, lamp(), 0, 0, 0); l.position.set(s * .9, y0 + 3.2, 1.05); g.add(l); }
-  // Mittelwagen
-  const y1 = front - cab - gap; deckCar(y1, car, g);
-  // Lok (Traxx-artig): niedriger Kasten in Betreiberfarbe, Führerstand hinten
-  const y2 = y1 - car - gap, lb = y2 - loco;
-  g.add(hull(loco - 1.6, M.red, y2, W + .05, FLOOR, 4.15, .6));
-  g.add(box(W + .1, loco - 4, .45, M.white, 0, y2 - loco / 2 + .5, 2.0));             // weißer Zierstreifen
-  g.add(box(2.0, loco - 6, .5, M.skirt, 0, y2 - loco / 2 + .4, 4.15));               // Dachausrüstung
-  const ln = profile([[0, .3], [1.2, .3], [1.6, 1.4], [1.45, 3.2], [.9, 4.15], [0, 4.15]], M.red, W + .05); ln.rotation.z = Math.PI; ln.position.y = lb + 1.6; g.add(ln);
-  const lg = box(W - .5, .08, 1.0, M.dark, 0, 0, 0); lg.rotation.x = .45; lg.position.set(0, lb + .55, 3.3); g.add(lg);
-  for (const s of [1, -1]) g.add(box(2.3, 3, .8, M.skirt, 0, y2 - loco / 2 + s * (loco / 2 - 3), 0));
+function buildDesiro() {
+  const g = new THREE.Group(), endL = 26.4, midL = 25.4, gap = .5, front = 52.5;
+  endCar(front, endL, 1, g);
+  const y1 = front - endL - gap; deckCar(y1, midL, g);
+  const y2 = y1 - midL - gap; deckCar(y2, midL, g);
+  endCar(y2 - midL - gap - endL, endL, -1, g);
   return g;
 }
-
-export const buildTrain = buildDouble;
+export const buildTrain = buildDesiro;
 
 /** Benutzerdefinierte MapLibre-Ebene: ein 3D-Zug an einer Position, in Fahrtrichtung gedreht. */
-const LIVERY = { db: 0xec0016, arverio: 0x0b5fb3, other: 0x6e6e73 };
+const LIVERY = { db: 0xec0016, arverio: 0x2b7fd4, other: 0x6e6e73 };
 
 export function createTrainLayer(maplibregl) {
-  const TRAIN_LENGTH = 74, TRAIN_WIDTH = 2.9, TARGET_PX = 64, TARGET_WIDTH_PX = 15; // Modelllänge in m, gewünschte Mindestlänge auf dem Bildschirm
+  const TRAIN_LENGTH = 105, TRAIN_WIDTH = 2.9, TARGET_PX = 64, TARGET_WIDTH_PX = 15; // Modelllänge in m, gewünschte Mindestlänge auf dem Bildschirm
   const state = { lonlat: null, bearing: 0, visible: true };
   const layer = {
     id: 'train3d', type: 'custom', renderingMode: '3d',
