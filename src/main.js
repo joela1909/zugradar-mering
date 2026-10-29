@@ -4,7 +4,7 @@ import './style.css';
 import * as api from './api.js';
 import { prepare, positionAt } from './train.js';
 import { expectedDelay, record, histKey } from './predict.js';
-import { dist, splitRoute } from './geo.js';
+import { dist, splitRoute, bearing as bearingTo } from './geo.js';
 import { createTrainLayer } from './train3d.js';
 import { dirOf, matchesDir, startName, timeProgress, distProgress, minutesUntil, buffer, stopFractions, livery } from './progress.js';
 
@@ -379,9 +379,18 @@ function onFix(pos) {
 function updateNav(pos, r) {
   if (!S.nav || !S.me || !S.follow) return;
   r ||= S.walk ? splitRoute(S.walk.coords, S.me) : null;
-  const speed = pos?.coords?.speed ?? 0, gpsHeading = pos?.coords?.heading;
-  const brg = r && r.off < 60 ? r.bearing : (speed > 1.5 && gpsHeading != null && !Number.isNaN(gpsHeading) ? gpsHeading : map.getBearing());
-  map.easeTo({ center: S.me, zoom: 17, pitch: 62, bearing: brg, duration: 900, easing: t => t, padding: { top: 120, bottom: Math.round(innerHeight * .32), left: 20, right: 20 } });
+  // Fahrtrichtung: Richtung der Route, sonst Blick Richtung Bahnhof
+  const toStation = bearingTo(S.me, S.station.lonlat);
+  const brg = r && r.off < 60 ? r.bearing : toStation;
+  // Ausschnitt: du + Zug + Bahnhof immer sichtbar, Neigung je nach Zoom (nah = steil geneigt, weit = flacher)
+  const b = new maplibregl.LngLatBounds(S.me, S.me); b.extend(S.station.lonlat); if (S.trainPos) b.extend(S.trainPos);
+  const pad = { top: 110, bottom: ($('tag').offsetHeight || 220) + 36, left: 56, right: 76 };
+  const pitchFor = z => Math.max(20, Math.min(62, 20 + (z - 10) * 6.5));
+  let cam = map.cameraForBounds(b, { padding: pad, bearing: brg, pitch: 0, maxZoom: 17.2 });
+  if (!cam) { map.easeTo({ center: S.me, zoom: 15, bearing: brg, pitch: 45, duration: 900, easing: t => t }); return; }
+  const pitch = pitchFor(cam.zoom);
+  cam = map.cameraForBounds(b, { padding: pad, bearing: brg, pitch, maxZoom: 17.2 }) || cam;
+  map.easeTo({ center: cam.center, zoom: cam.zoom, bearing: brg, pitch, duration: 1100, easing: t => t });
 }
 async function startNav() {
   S.nav = true; S.follow = true; document.body.classList.add('nav');
@@ -455,7 +464,9 @@ function tick() {
   const it = labels.find(l => l.trainLabel); if (it) it.ll = pos;
   S.trainLabel.setLngLat(pos); S.trainLabel.getElement().innerHTML = html; S.trainLabel.getElement().dataset.livery = lv;
   layout(); fillProg();
+  if (S.nav && S.follow && ++navTicks % 4 === 0) updateNav();
 }
+let navTicks = 0;
 
 function logObservation() {
   const p = prediction(); if (!p || !S.live) return;
