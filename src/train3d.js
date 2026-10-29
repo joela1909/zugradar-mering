@@ -94,7 +94,7 @@ function endCar(yFace, L, dir, g, short = false) {
 
 // Eine Zugeinheit aus vier Wagen (Endwagen, 2 Doppelstockwagen, Endwagen); jeder Wagen mit seinem vorderen Ende bei y = 0 gebaut.
 // setCars(n) zeigt 4, 3 (1., 2., 4.) oder 1 Wagen (kurzer Wagen mit zwei Nasen) und rückt sie mittig zusammen – beim Herauszoomen kürzer statt gestaucht.
-const END_L = 26.4, MID_L = 25.4, SHORT_L = 20, GAP = .5, COUPLER = 1.2;
+const END_L = 26.4, MID_L = 25.4, SHORT_L = 17, GAP = .5, COUPLER = 1.2;
 function buildUnit() {
   const mk = f => { const c = new THREE.Group(); f(c); return c; };
   const cars = [
