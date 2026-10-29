@@ -325,6 +325,8 @@ async function selectTrip(id, fit, soft = false) {
   if (!dep) { S.tr = null; map.getSource('rail').setData(emptyFC); render(); return; }
   try {
     const t = S.live ? await api.trip(id, S.station) : await S.demo.trip(id);
+    if (S.sel !== id) return; // inzwischen anderer Zug gewählt: diese (ältere) Antwort verwerfen, sonst bleiben ihre Halte-Labels stehen
+    S.markers.forEach(m => m.remove()); S.markers = []; dots = []; labels = labels.filter(l => !l.stop);
     const stopIdx = t.stopovers.findIndex(s => (S.station.id && s.id === S.station.id) || /afra/i.test(s.name));
     const line = S.railLines.get(id) || t.polyline;
     S.tr = { ...prepare(t.stopovers, line), raw: t, dep, stopIdx };
@@ -338,7 +340,7 @@ async function selectTrip(id, fit, soft = false) {
       S.markers.push(marker); S.stopLabels.push({ i, marker });
       S.markers.push(mk(el('dot', ''), s.lonlat)); dots.push(s.lonlat);
     });
-  } catch (e) { console.warn(e); S.tr = null; map.getSource('rail').setData(emptyFC); }
+  } catch (e) { console.warn(e); if (S.sel !== id) return; S.tr = null; map.getSource('rail').setData(emptyFC); }
   placeBase(); render(); tick();
   if (fit) fitAll();
 }
@@ -588,9 +590,12 @@ function bar(icon, left, right, frac, tone, ticks = []) {
   const px = Math.max(240, ($('sheet').clientWidth || 360) - 32), pos = f => `calc(10px + (100% - 20px) * ${f.toFixed(4)})`;
   const dot = (f, cls) => `<b class="tk ${cls}" style="left:${pos(f)}"></b>`;
   const dots = ticks.length || frac != null ? [dot(0, 'start p'), ...ticks.map(t => dot(t.f, t.f <= frac ? 'p' : '')), dot(1, 'end' + (frac >= 1 ? ' p' : ''))].join('') : '';
-  let last = -99;
-  const names = ticks.filter(t => { const x = t.f * px; if (t.f < .14 || t.f > .86 || x - last < 56) return false; last = x; return true; })
-    .map(t => `<span style="left:${pos(t.f)}">${shortName(t.name).slice(0, 13)}</span>`).join('');
+  // Haltnamen unter dem Balken nur, wo Platz ist: Breite aus der Textlänge geschätzt (11 px Schrift ≈ 6 px je Zeichen)
+  let lastRight = -99;
+  const names = ticks.map(t => ({ ...t, label: shortName(t.name).slice(0, 13) })).filter(t => {
+    const x = t.f * px, half = t.label.length * 3.1 + 4;
+    if (t.f < .14 || t.f > .86 || x - half < lastRight) return false; lastRight = x + half; return true;
+  }).map(t => `<span style="left:${pos(t.f)}">${t.label}</span>`).join('');
   return `<div class="pbar t-${tone}"><i style="width:${frac > 0 ? pos(frac) : '0px'}"></i><u class="base"></u>${dots}<span class="pl1">${icon} ${left}</span><span class="pr1">${right}</span></div>${names ? `<div class="tklabels">${names}</div>` : ''}`;
 }
 function trainStops(dep, tStart, tEnd) {
