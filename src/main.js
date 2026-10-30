@@ -16,7 +16,8 @@ const HOME_ADDRESS = 'Koloniestraße 26, 86399 Bobingen';
 const HOME_FALLBACK = [10.8330, 48.2730]; // Bobingen (Mitte), falls die Adressuche nicht klappt
 
 const $ = id => document.getElementById(id);
-const fmt = d => (d ? d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '–');
+// Uhrzeiten immer in deutscher Zeit (auch wenn das Gerät auf eine andere Zeitzone eingestellt ist)
+const fmt = d => (d ? d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' }) : '–');
 const sgn = m => (m >= 0.5 ? `+${Math.round(m)}` : m <= -0.5 ? `${Math.round(m)}` : '±0');
 const cls = m => (m >= 5 ? 'late' : m >= 1 ? 'minor' : 'ontime');
 const addMin = (d, m) => new Date(+d + m * 60000);
@@ -32,7 +33,10 @@ const parts = d => [d, ...(d?.coupled || [])];
 const groupOf = id => vis().find(d => parts(d).some(x => x.tripId === id));
 const shortLine = l => l.replace(/^[A-Za-z]{2,4}\s+(?=[A-Z]{1,3}\s?\d)/, '');   // „ARV RE89“ → „RE89“ (Farbe zeigt den Betreiber)
 const lineText = d => parts(d).map(x => x.line).join(' + ');
-const dirText = d => [...new Set(parts(d).map(x => x.direction))].join(' · ');
+// Ziele; trennen sich gekoppelte Züge (z. B. Ulm Hbf + Würzburg Hbf), kurz und ohne „Hbf“: „Ulm / Würzburg“
+const dests = d => [...new Set(parts(d).map(x => x.direction))];
+const shortDest = n => n.replace(/\s+Hbf$/, '').replace(/\s*\((Oberbay|Schwab)\)$/, '');
+const dirText = d => { const ds = dests(d); return ds.length > 1 ? ds.map(shortDest).join(' / ') : ds[0]; };
 // gekoppelt: kurze Linien ohne Betreiberkürzel (die Farbe zeigt den Betreiber), damit das Ziel daneben Platz hat
 const badges = (d, sm = '') => {
   const ps = parts(d), lv = livery(d);
@@ -539,7 +543,7 @@ function renderList(list) {
     const m = d.delay ?? 0, t = d.actual || d.planned;
     return `<button class="brow ${d.tripId === S.sel ? 'sel' : ''}${d.cancelled ? ' cx' : ''}${was ? ' gone' : ''}" data-id="${d.tripId}">
       <span class="bt"><b class="${d.cancelled ? 'late' : cls(m)}">${d.cancelled ? `<s>${fmt(d.planned)}</s>` : fmt(t)}</b>${m >= 1 && !d.cancelled ? `<s>${fmt(d.planned)}</s>` : ''}</span>
-      ${badges(d, ' sm')}<span class="bd">${dirText(d)}<small>Gl. ${d.platform}</small></span>
+      ${badges(d, ' sm')}<span class="bd">${dests(d).length > 1 ? `${shortDest(dests(d)[0])}<small>+ ${dests(d).slice(1).map(shortDest).join(', ')} · Gl. ${d.platform}</small>` : `${dirText(d)}<small>Gl. ${d.platform}</small>`}</span>
       <span class="chip ${d.cancelled ? 'late' : cls(m)}">${d.cancelled ? 'Ausfall' : m >= 1 ? '+' + Math.round(m) : '±0'}</span></button>`;
   };
   const rows = next.map(d => row(d, false)).join('');
@@ -573,7 +577,7 @@ function renderDetails(dep, p) {
     dep?.plannedPlatform && dep.platform !== dep.plannedPlatform && kv('Gleiswechsel', `<span class="late">Gl. ${dep.platform} statt ${dep.plannedPlatform}</span>`),
     !S.nav && kv('Weg zum Bahnhof', `<button id="modebtn" class="pillbtn">${MODES[S.mode][0]} ${MODES[S.mode][1]}</button>`),
     !S.nav && kv('Richtungsfilter', `<span class="kvcol"><button id="strictbtn" class="pillbtn">${S.strict ? 'An' : 'Aus'}</button><small>${S.strict ? 'nur Züge ' + RULE[S.dir] : 'alle Züge'}</small></span>`),
-    kv('Daten', S.live ? `DB live${S.updated ? ` · ${S.updated.toLocaleTimeString('de-DE')}` : ''}` : 'Demo'),
+    kv('Daten', S.live ? `DB live${S.updated ? ` · ${S.updated.toLocaleTimeString('de-DE', { timeZone: 'Europe/Berlin' })}` : ''}` : 'Demo'),
     S.limit && S.limit.used != null && kv('Bahn-Abfragen', `${S.limit.used} von ${S.limit.limit} pro Minute`),
     S.live && kv('Gleislinien', railInfo()),
     liveError && kv('Technik', `<small class="tech">${liveError.replace(/</g, '&lt;')}</small>`),

@@ -8,7 +8,8 @@ export function record(key, delayMin) {
   const h = load(); const a = h[key] || [];
   a.push(delayMin); h[key] = a.slice(-30); save(h);
 }
-export const histKey = (line, planned) => `${line}|${String(planned.getHours()).padStart(2, '0')}:${String(planned.getMinutes()).padStart(2, '0')}`;
+// Uhrzeit in deutscher Zeit (unabhängig von der Zeitzone des Geräts)
+export const histKey = (line, planned) => `${line}|${planned.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' })}`;
 
 /**
  * Erwartete Verspätung am Bahnhof (Min).
