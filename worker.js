@@ -134,10 +134,11 @@ async function locations(env, q) {
 }
 
 async function departures(env, eva, q) {
-  const now = new Date(), hours = Math.ceil((Number(q.get('duration')) || 120) / 60);
-  const plans = await Promise.all(Array.from({ length: hours + 1 }, (_, i) => plan(env, eva, addHours(now, i))));
+  // past: auch bereits abgefahrene Züge der letzten Minuten (dafür die Fahrpläne der Stunde(n) davor)
+  const now = new Date(), hours = Math.ceil((Number(q.get('duration')) || 120) / 60), pastMin = Math.min(180, Number(q.get('past')) || 0), back = Math.ceil(pastMin / 60);
+  const plans = await Promise.all(Array.from({ length: hours + 1 + back }, (_, i) => plan(env, eva, addHours(now, i - back))));
   const stops = merge(plans.flat(), await changes(env, eva));
-  return { departures: toDepartures(stops, eva, now).slice(0, Number(q.get('results')) || 14) };
+  return { departures: toDepartures(stops, eva, now, pastMin).slice(0, Number(q.get('results')) || 14) };
 }
 
 // Fahrtverlauf: dieselbe Fahrt an den Nachbarbahnhöfen suchen, dort Zeiten + Koordinaten holen

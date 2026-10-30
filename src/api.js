@@ -21,7 +21,7 @@ export async function findStation() {
 export async function geocode(q) { const r = await j(`${BASE}/geocode?q=${encodeURIComponent(q)}`); return [r.longitude, r.latitude]; }
 
 export async function departures(station) {
-  const r = await j(`${BASE}/stops/${station.id}/departures?duration=240&results=60&language=de&remarks=false`);
+  const r = await j(`${BASE}/stops/${station.id}/departures?duration=240&past=90&results=80&language=de&remarks=false`);
   return r.departures.map(d => ({
     tripId: d.tripId, line: d.line?.name || '?', direction: d.direction || '', platform: d.platform || d.plannedPlatform || '–', plannedPlatform: d.plannedPlatform || null,
     trainNo: d.trainNo || null, category: d.category || null, origin: d.origin || null, nextStops: d.nextStops || [], previousStops: d.previousStops || [],

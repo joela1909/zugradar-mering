@@ -170,3 +170,8 @@ body.nav .dirctl,body.nav .status{display:none}
 /* gekoppelte Züge: Linien-Badges mit Kupplungszeichen */
 .badge .cpl{font-style:normal;opacity:.75;margin:0 2px}
 .couple{color:var(--mute);font-weight:700;font-size:12px;margin:0 -4px;flex:none}
+
+/* zuletzt abgefahrene Züge: blass über den nächsten Verbindungen */
+.bpast{margin-bottom:6px;padding-bottom:6px;border-bottom:.5px solid var(--sep)}
+.bsep{padding:0 10px 2px;font-size:12px}
+.brow.gone{opacity:.5}.brow.gone.sel{opacity:.8}

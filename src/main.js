@@ -331,15 +331,18 @@ async function refresh() {
     }
     S.loading = false; updateStatus();
     if (S.live) api.limit().then(l => { S.limit = l; }).catch(() => {});
-    if (!S.sel || !groupOf(S.sel)) S.sel = pickDefault()?.tripId;
+    const cur = S.sel && groupOf(S.sel);
+    if (!cur || (!S.pinned && gone(cur))) { S.sel = pickDefault()?.tripId; S.pinned = false; } // automatisch gewählt: nach der Abfahrt zum nächsten Zug
     await selectTrip(S.sel, false, true);
   } finally { $('refresh').style.opacity = 1; refreshing = false; }
 }
 
+// abgefahren: mehr als 1 min nach der (tatsächlichen) Abfahrt
+const gone = d => +(d.actual || d.planned) < Date.now() - 60000;
 function pickDefault() {
   const now = new Date(), walkMin = S.walk ? Math.ceil(S.walk.seconds / 60) + 1 : 0;
   const list = vis(), ok = list.filter(d => !d.cancelled);
-  return ok.find(d => addMin(d.actual || d.planned, -walkMin) > now) || ok.find(d => addMin(d.actual || d.planned, 1) > now) || list[0];
+  return ok.find(d => addMin(d.actual || d.planned, -walkMin) > now) || ok.find(d => addMin(d.actual || d.planned, 1) > now) || list.find(d => !gone(d)) || list[list.length - 1];
 }
 
 const stopHtml = s => { const d = s.arrDelay ?? s.depDelay ?? 0; return `${shortName(s.name)}<br><i class="${cls(d)}">${fmt(s.arr || s.dep)}${d >= 1 ? ' +' + Math.round(d) : ''}</i>`; };
@@ -523,21 +526,25 @@ function render() {
   on('navstart', startNav); on('navend', stopNav); on('recenter', () => { S.follow = true; render(); updateNav(); });
   const sig = [dep.tripId, fmt(depShown), dMin, S.nav].join('|'), prevSig = render.sig; render.sig = sig;
   if (prevSig && prevSig !== sig) { const swap = prevSig.split('|')[0] !== dep.tripId; peek.classList.remove('upd', 'swap'); void peek.offsetWidth; peek.classList.add(swap ? 'swap' : 'upd'); }
-  full.querySelectorAll('.brow').forEach(b => b.onclick = () => { setSheet('half'); selectTrip(b.dataset.id, true); });
+  full.querySelectorAll('.brow').forEach(b => b.onclick = () => { S.pinned = true; setSheet('half'); selectTrip(b.dataset.id, true); });
   bindDetails();
   fillProg();
   setSheet(S.sheet, true);
 }
 
+// oben die letzten 3 abgefahrenen Züge (blass), darunter die nächsten
 function renderList(list) {
-  const rows = list.slice(0, 12).map(d => {
+  const past = list.filter(gone).slice(-3), next = list.filter(d => !gone(d)).slice(0, 12);
+  const row = (d, was) => {
     const m = d.delay ?? 0, t = d.actual || d.planned;
-    return `<button class="brow ${d.tripId === S.sel ? 'sel' : ''}${d.cancelled ? ' cx' : ''}" data-id="${d.tripId}">
+    return `<button class="brow ${d.tripId === S.sel ? 'sel' : ''}${d.cancelled ? ' cx' : ''}${was ? ' gone' : ''}" data-id="${d.tripId}">
       <span class="bt"><b class="${d.cancelled ? 'late' : cls(m)}">${d.cancelled ? `<s>${fmt(d.planned)}</s>` : fmt(t)}</b>${m >= 1 && !d.cancelled ? `<s>${fmt(d.planned)}</s>` : ''}</span>
       ${badges(d, ' sm')}<span class="bd">${dirText(d)}<small>Gl. ${d.platform}</small></span>
       <span class="chip ${d.cancelled ? 'late' : cls(m)}">${d.cancelled ? 'Ausfall' : m >= 1 ? '+' + Math.round(m) : '±0'}</span></button>`;
-  }).join('');
-  return `<div class="bh"><b>Nächste Verbindungen</b><span class="sub">Richtung ${DIRS[S.dir]}</span></div><div class="blist">${rows || '<div class="sub" style="padding:8px 4px">Keine weiteren Verbindungen.</div>'}</div>`;
+  };
+  const rows = next.map(d => row(d, false)).join('');
+  const pastRows = past.length ? `<div class="bpast"><div class="sub bsep">Zuletzt abgefahren</div>${past.map(d => row(d, true)).join('')}</div>` : '';
+  return `<div class="bh"><b>Nächste Verbindungen</b><span class="sub">Richtung ${DIRS[S.dir]}</span></div>${pastRows}<div class="blist">${rows || '<div class="sub" style="padding:8px 4px">Keine weiteren Verbindungen.</div>'}</div>`;
 }
 
 // Fahrtverlauf als senkrechte Zeitleiste: Halt, Plan- und Ist-Zeit; vergangene Halte blass, eigener Bahnhof hervorgehoben

@@ -59,7 +59,7 @@ const lineName = s => (s.dp?.l || s.ar?.l) ? `${s.tl?.c || ''} ${s.dp?.l || s.ar
 const splitPath = p => (p ? p.split('|').filter(Boolean) : []);
 export const tripKey = id => (id || '').replace(/-\d+$/, '');
 
-export function toDepartures(stops, eva, now = new Date()) {
+export function toDepartures(stops, eva, now = new Date(), pastMin = 0) {
   const seen = new Set();
   return stops.filter(s => !seen.has(s.id) && seen.add(s.id)).filter(s => s.dp?.pt && !/^bus$/i.test(s.tl?.c || '')).map(s => {
     const planned = parseTime(s.dp.pt), actual = parseTime(s.dp.ct || s.dp.pt);
@@ -75,7 +75,7 @@ export function toDepartures(stops, eva, now = new Date()) {
       trainNo: s.tl?.n || null, category: s.tl?.c || null, operator: s.tl?.o || null,
       origin: splitPath(s.ar?.ppth)[0] || null, nextStops: path, previousStops: splitPath(s.ar?.ppth),
     };
-  }).filter(d => +new Date(d.when) > +now - 120000).sort((a, b) => a.when.localeCompare(b.when));
+  }).filter(d => +new Date(d.when) > +now - Math.max(2, pastMin) * 60000).sort((a, b) => a.when.localeCompare(b.when));
 }
 
 export function toStopover(name, eva, location, s) {
