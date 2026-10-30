@@ -66,3 +66,11 @@ test('gekoppelte Züge: gleiche Planzeit und Richtung → ein Eintrag', () => {
   ]);
   assert.deepEqual(list.map(d => [d.tripId, d.coupled.map(x => x.tripId)]), [['a', ['b']], ['c', []], ['d', []]]);
 });
+test('gekoppelte Züge: größte Verspätung gilt (RE80 ±0, RE89 +1 → +1)', () => {
+  const t = new Date('2026-10-30T16:52:00Z'), muc = ['Mering', 'München Hbf'];
+  const [g] = couple([
+    { tripId: 'a', line: 'RE80', planned: t, actual: t, delay: 0, nextStops: muc },
+    { tripId: 'b', line: 'RE89', planned: t, actual: new Date(+t + 60000), delay: 1, nextStops: muc },
+  ]);
+  assert.equal(g.delay, 1); assert.equal(+g.actual, +t + 60000);
+});

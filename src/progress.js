@@ -67,12 +67,15 @@ export function livery(dep) {
 }
 
 /** Abfahrten zur exakt gleichen Planzeit in dieselbe Richtung fahren gekoppelt (z. B. RE80 + RE89):
- *  ein Eintrag je Zug, die weiteren Zugteile stehen in .coupled */
+ *  ein Eintrag je Zug, die weiteren Zugteile stehen in .coupled. Da sie zusammen abfahren, gilt die größte Verspätung. */
 export function couple(list) {
   const out = [], by = new Map();
   for (const d of list) {
     const k = +d.planned + '|' + dirOf(d), g = by.get(k);
-    if (g) g.coupled.push(d); else { const c = { ...d, coupled: [] }; by.set(k, c); out.push(c); }
+    if (g) {
+      g.coupled.push(d);
+      if ((d.delay ?? 0) > (g.delay ?? 0)) { g.delay = d.delay; g.actual = d.actual; }
+    } else { const c = { ...d, coupled: [] }; by.set(k, c); out.push(c); }
   }
   return out;
 }
