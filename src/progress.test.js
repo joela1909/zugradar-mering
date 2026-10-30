@@ -74,6 +74,15 @@ test('gleiche Planzeit, aber 8 min Unterschied: heute getrennt (RB89 pünktlich,
   ]);
   assert.deepEqual(list.map(d => [d.tripId, d.delay, d.coupled.length]), [['rb', 0, 0], ['re', 8, 0]]);
 });
+test('Flügelzug laut Bahn bleibt gekoppelt, auch bei 8 min Unterschied; verspäteter Teil wird Hauptzug', () => {
+  const t = new Date('2026-10-30T19:04:00Z'), aug = ['Kissing', 'Augsburg Hbf'];
+  const list = couple([
+    { tripId: 'rb', key: 'K-RB', wings: ['K-RE'], line: 'RB89', planned: t, actual: t, delay: 0, nextStops: aug },
+    { tripId: 're', key: 'K-RE', wings: [], line: 'RE80', planned: t, actual: new Date(+t + 8 * 60000), delay: 8, nextStops: aug },
+  ]);
+  assert.equal(list.length, 1);
+  assert.deepEqual([list[0].tripId, list[0].delay, list[0].coupled.map(x => x.tripId)], ['re', 8, ['rb']]);
+});
 test('gekoppelte Züge: größte Verspätung gilt (RE80 ±0, RE89 +1 → +1)', () => {
   const t = new Date('2026-10-30T16:52:00Z'), muc = ['Mering', 'München Hbf'];
   const [g] = couple([

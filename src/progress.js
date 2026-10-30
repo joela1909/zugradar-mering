@@ -66,18 +66,22 @@ export function livery(dep) {
   return 'other';
 }
 
-/** Abfahrten zur exakt gleichen Planzeit in dieselbe Richtung fahren gekoppelt (z. B. RE80 + RE89):
- *  ein Eintrag je Zug, die weiteren Zugteile stehen in .coupled. Da sie zusammen abfahren, gilt die größte Verspätung.
- *  Liegen die tatsächlichen Abfahrten mehr als 2 min auseinander, fahren sie heute getrennt → zwei Einträge. */
+/** Gekoppelte Züge (z. B. RE80 + RE89) zu einem Eintrag zusammenfassen; weitere Zugteile stehen in .coupled.
+ *  - Markiert die Bahn sie als Flügelzug (wings), sind sie gekoppelt – auch wenn sie unterschiedliche Verspätungen meldet.
+ *  - Sonst: gleiche Planzeit, gleiche Richtung und tatsächliche Abfahrt höchstens 2 min auseinander.
+ *  Ein gekoppelter Zug fährt erst mit seinem verspätetsten Teil; dieser Teil wird zum Hauptzug (Verlauf, Position, Zeit). */
 export function couple(list) {
-  const out = [], by = new Map(), at = d => +(d.actual || d.planned);
+  const groups = [], by = new Map(), at = d => +(d.actual || d.planned);
+  const linked = (a, b) => !!((a.key && b.wings?.includes(a.key)) || (b.key && a.wings?.includes(b.key)));
+  const elsewhere = d => d.wings?.length > 0; // laut Bahn mit einem anderen Zug gekoppelt
   for (const d of list) {
-    const k = +d.planned + '|' + dirOf(d), g = by.get(k);
-    if (g && Math.abs(at(d) - at(g)) > 120000) { out.push({ ...d, coupled: [] }); continue; } // heute nicht gekoppelt
-    if (g) {
-      g.coupled.push(d);
-      if ((d.delay ?? 0) > (g.delay ?? 0)) { g.delay = d.delay; g.actual = d.actual; }
-    } else { const c = { ...d, coupled: [] }; by.set(k, c); out.push(c); }
+    const k = +d.planned + '|' + dirOf(d), cands = by.get(k) || [];
+    const g = cands.find(g => g.some(x => linked(x, d))) ||
+      cands.find(g => !g.some(x => elsewhere(x) && !g.some(y => linked(x, y))) && !elsewhere(d) && Math.abs(at(d) - at(g[0])) <= 120000);
+    if (g) g.push(d); else { const n = [d]; cands.push(n); by.set(k, cands); groups.push(n); }
   }
-  return out;
+  return groups.map(g => {
+    const main = g.reduce((m, x) => ((x.delay ?? 0) > (m.delay ?? 0) ? x : m), g[0]);
+    return { ...main, coupled: g.filter(x => x !== main) };
+  }).sort((a, b) => at(a) - at(b));
 }

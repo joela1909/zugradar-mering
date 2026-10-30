@@ -73,6 +73,7 @@ export function toDepartures(stops, eva, now = new Date(), pastMin = 0) {
       platform: s.dp.cp || s.dp.pp || null, plannedPlatform: s.dp.pp || null,
       cancelled: s.dp.cs === 'c',
       trainNo: s.tl?.n || null, category: s.tl?.c || null, operator: s.tl?.o || null,
+      tripKey: tripKey(s.id), wings: splitPath(s.dp.wings), // Flügelzug-Partner laut Bahn (deren tripKey)
       origin: splitPath(s.ar?.ppth)[0] || null, nextStops: path, previousStops: splitPath(s.ar?.ppth),
     };
   }).filter(d => +new Date(d.when) > +now - Math.max(2, pastMin) * 60000).sort((a, b) => a.when.localeCompare(b.when));
