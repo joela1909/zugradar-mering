@@ -116,18 +116,20 @@ function buildUnit() {
   };
   return unit;
 }
-// Zug: eine Einheit, oder zwei gekoppelte Einheiten hintereinander (Nase an Nase)
+// Zug: eine Einheit oder mehrere gekoppelte Einheiten hintereinander (Nase an Nase); Einheiten werden bei Bedarf gebaut
 export function buildTrain() {
-  const a = buildUnit(), b = buildUnit(), train = new THREE.Group();
-  train.add(a, b);
+  const units = [], train = new THREE.Group();
   const arrange = () => {
-    if (!train.coupled) { a.position.y = 0; b.visible = false; train.len = a.len; return; }
-    b.visible = true; train.len = a.len + COUPLER + b.len;
-    a.position.y = train.len / 2 - a.len / 2; b.position.y = -train.len / 2 + b.len / 2;
+    while (units.length < train.units) { const u = buildUnit(); u.setCars(train.cars); units.push(u); train.add(u); }
+    const vis = units.slice(0, train.units);
+    train.len = vis.reduce((s, u) => s + u.len, 0) + COUPLER * (vis.length - 1);
+    let y = train.len / 2;
+    units.forEach((u, i) => { u.visible = i < train.units; });
+    for (const u of vis) { u.position.y = y - u.len / 2; y -= u.len + COUPLER; }
   };
-  train.setCars = n => { if (train.cars === n) return; train.cars = n; a.setCars(n); b.setCars(n); arrange(); };
-  train.setCoupled = c => { if (train.coupled === c) return; train.coupled = c; arrange(); };
-  train.setCars(4); train.setCoupled(false);
+  train.setCars = n => { if (train.cars === n) return; train.cars = n; units.forEach(u => u.setCars(n)); arrange(); };
+  train.setUnits = n => { n = Math.max(1, Math.min(4, n)); if (train.units === n) return; train.units = n; arrange(); };
+  train.cars = 4; train.setUnits(1);
   return train;
 }
 
@@ -144,7 +146,7 @@ export function createTrainLayer(maplibregl) {
       this.camera = new THREE.Camera(); this.scene = new THREE.Scene();
       this.scene.add(new THREE.AmbientLight(0xffffff, 2.6));
       const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(-.4, -.7, 1).normalize(); this.scene.add(sun);
-      this.train = buildTrain(); this.train.setCoupled(!!state.coupled); this.scene.add(this.train);
+      this.train = buildTrain(); this.train.setUnits(state.units || 1); this.scene.add(this.train);
       this.renderer = new THREE.WebGLRenderer({ canvas: map.getCanvas(), context: gl, antialias: true });
       this.renderer.autoClear = false;
     },
@@ -177,7 +179,7 @@ export function createTrainLayer(maplibregl) {
       state.box = x1 < Infinity ? { x1, y1, x2, y2 } : null;
     },
   };
-  const setCoupled = c => { state.coupled = c; layer.train?.setCoupled(c); layer.map?.triggerRepaint(); };
+  const setUnits = n => { if (state.units === n) return; state.units = n; layer.train?.setUnits(n); layer.map?.triggerRepaint(); }; // Anzahl gekoppelter Einheiten
   const setLivery = name => { const c = LIVERY[name] ?? LIVERY.other; if (state.livery !== name) { state.livery = name; M.red.color.set(c); } };
-  return { layer, state, setLivery, setCoupled };
+  return { layer, state, setLivery, setUnits };
 }

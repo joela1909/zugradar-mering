@@ -14,6 +14,8 @@ import { dirOf, matchesDir, couple, startName, timeProgress, distProgress, minut
 
 const HOME_ADDRESS = 'Koloniestraße 26, 86399 Bobingen';
 const HOME_FALLBACK = [10.8330, 48.2730]; // Bobingen (Mitte), falls die Adressuche nicht klappt
+const CAR_DEST = [10.9726646, 48.2724729]; // Ziel mit dem Auto (Parkplatz am Bahnhof Mering-St Afra)
+const dest = () => (S.mode === 'car' ? CAR_DEST : S.station.lonlat); // Ziel der Route je nach Verkehrsmittel
 
 const $ = id => document.getElementById(id);
 // Uhrzeiten immer in deutscher Zeit (auch wenn das Gerät auf eine andere Zeitzone eingestellt ist)
@@ -297,8 +299,8 @@ const remainS = () => (S.walk ? S.walk.seconds * (S.walk.meters ? remainM() / S.
 async function loadWalk() {
   await ensureLayers();
   const from = S.me || S.home;
-  try { S.walk = await api.route(S.mode, from, S.station.lonlat); }
-  catch { const m = dist(from, S.station.lonlat) * 1.3; S.walk = { coords: [from, S.station.lonlat], meters: m, seconds: m / ({ foot: 1.33, bike: 4.2, car: 11 }[S.mode]) }; }
+  try { S.walk = await api.route(S.mode, from, dest()); }
+  catch { const m = dist(from, dest()) * 1.3; S.walk = { coords: [from, dest()], meters: m, seconds: m / ({ foot: 1.33, bike: 4.2, car: 11 }[S.mode]) }; }
   S.walkRemain = null; drawWalk();
   S.lastRoute = { ll: from, t: Date.now() };
   if (S.me && (!S.trackTotal || S.walk.meters > S.trackTotal)) S.trackTotal = S.walk.meters;
@@ -707,7 +709,7 @@ function onFix(pos) {
   S.meAnim = { from: S.meShown || target, to: target, t0: now, dur: Math.min(1500, Math.max(400, now - (S.meAnim?.t0 ?? now - 1000))) };
   if (first || off || (!S.nav && (moved > 120 || Date.now() - S.lastRoute.t > 45000))) loadWalk().then(() => { if (S.nav) updateNav(pos); render(); layout(); if (first && !S.nav) fitAll(); });
   else { fillProg(); if (S.nav) updateNav(pos, r); }
-  if (S.nav && dist(ll, S.station.lonlat) < 70) { stopNav(); const p = prediction(); toast(p ? `Angekommen. ${lineText(S.tr.dep)} fährt um ${fmt(p.depT)} von Gleis ${S.tr.dep.platform}.` : 'Angekommen.'); }
+  if (S.nav && dist(ll, dest()) < 70) { stopNav(); const p = prediction(); toast(p ? `Angekommen. ${lineText(S.tr.dep)} fährt um ${fmt(p.depT)} von Gleis ${S.tr.dep.platform}.` : 'Angekommen.'); }
 }
 
 // ---- Navigation: Karte folgt dir, geneigt und nach vorn gedreht, ohne Abbiegehinweise ----
@@ -840,7 +842,7 @@ function tick() {
   const pos = S.trainPos || positionAt(S.tr, new Date()).pos; // Position selbst setzt moveTrain bei jedem Bild
   // schmal halten: Betreiberkürzel weglassen (die Farbe zeigt den Betreiber), „ARV RE89“ → „RE89“
   const d = S.tr.dep.delay ?? 0, ns = nextStop(), line = parts(S.tr.dep).map(x => shortLine(x.line)).join('+');
-  train3d.setCoupled(parts(S.tr.dep).length > 1);
+  train3d.setUnits(parts(S.tr.dep).length);
   const html = `${line}${d >= 1 ? ` <b>+${Math.round(d)}</b>` : ''}${ns ? `<small>${fmt(ns.arr || ns.dep)} ${shortName(ns.name)}</small>` : ''}`;
   if (!S.trainMarker) S.trainMarker = new maplibregl.Marker({ element: el('trainmodel', TRAIN_SVG), anchor: 'center', rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat(pos).addTo(map);
   S.trainMarker.setLngLat(pos);
