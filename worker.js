@@ -26,17 +26,18 @@ async function cached(key, ttl, fn) {
 export class RateLimiter {
   constructor(state, env) { this.w = new SlidingWindow(Number(env.DB_RATE_LIMIT) || 60, 60000); }
   async fetch(req) {
-    const u = new URL(req.url), n = Number(u.searchParams.get('n')) || 0;
-    if (u.pathname === '/take') return Response.json({ k: this.w.take(n) });
+    const u = new URL(req.url), n = Number(u.searchParams.get('n')) || 0, r = Number(u.searchParams.get('r')) || 0;
+    if (u.pathname === '/take') return Response.json({ k: this.w.take(n, Date.now(), r) });
     if (u.pathname === '/give') { this.w.give(n); return Response.json({ ok: true }); }
     if (u.pathname === '/pause') { this.w.pause(n); return Response.json({ ok: true }); }
     return Response.json({ used: this.w.used(), limit: this.w.limit, nextFreeMs: this.w.nextFree() });
   }
 }
-function makeBudget(env) {
+// reserve: Freigaben, die diese Anfrage übrig lassen muss (Fahrtverläufe lassen Platz für die eigenen Abfahrten)
+function makeBudget(env, reserve = 0) {
   const stub = env.LIMITER ? env.LIMITER.get(env.LIMITER.idFromName('db-timetables')) : null;
   let pool = 0, empty = false, chain = Promise.resolve();
-  const call = async (path, n) => (await stub.fetch(`https://limiter/${path}?n=${n}`)).json();
+  const call = async (path, n) => (await stub.fetch(`https://limiter/${path}?n=${n}&r=${reserve}`)).json();
   return {
     // eine Freigabe holen (Anfragen werden der Reihe nach bedient, damit wichtige zuerst drankommen)
     take() {
@@ -182,7 +183,7 @@ async function resolve(env, name) {
 async function trip(env, tripId) {
   const [id, eva, pt] = tripId.split('@');
   const base = parseTime(pt);
-  const own = merge(await plan(env, eva, base), await changes(env, eva)).find(s => s.id === id);
+  const own = merge(await plan(env, eva, base), await changes(env, eva, 10)).find(s => s.id === id); // teilt sich den Abruf mit den Abfahrten
   if (!own) throw new ApiError('Fahrt nicht gefunden');
   const ownName = (stations.find(r => r[0] === eva) || [])[1] || 'Mering St Afra';
   const win = trackWindow(splitPath(own.ar?.ppth), splitPath(own.dp?.ppth), 4);
@@ -199,8 +200,8 @@ async function trip(env, tripId) {
   const n = win.before.length;
   // Reihenfolge nach Nähe zum Bahnhof: bei knappem Kontingent bekommen die nahen Halte die frischen Daten
   const jobs = [...win.before.map((name, i) => ({ side: 'b', i, d: n - i, name, sh: hourShifts(n - i, -1, base) })), ...win.after.map((name, i) => ({ side: 'a', i, d: i + 1, name, sh: hourShifts(i + 1, 1, base) }))].sort((x, y) => x.d - y.d);
-  // ferne Halte (> 4 Stationen) höchstens einmal pro Minute frisch, damit das Kontingent für die nahen reicht
-  const done = await Promise.all(jobs.map(j => find(j.name, j.sh, j.d > 4 ? 60 : 0).catch(() => null).then(r => ({ ...j, r }))));
+  // andere Halte seltener frisch (nahe alle 30 s, ferne alle 2 min) – sonst verbraucht ein Fahrtverlauf das ganze Kontingent
+  const done = await Promise.all(jobs.map(j => find(j.name, j.sh, j.d > 4 ? 120 : 30).catch(() => null).then(r => ({ ...j, r }))));
   const beforeStops = win.before.map((_, i) => done.find(j => j.side === 'b' && j.i === i).r);
   const afterStops = win.after.map((_, i) => done.find(j => j.side === 'a' && j.i === i).r);
   const here1 = toStopover(ownName, eva, await locate(ownName, eva), own);
@@ -213,7 +214,7 @@ export default {
   async fetch(req, env0, ctx) {
     const url = new URL(req.url);
     if (!url.pathname.startsWith('/api/')) return env0.ASSETS.fetch(req);
-    const budget = makeBudget(env0), env = { ...env0, budget };
+    const budget = makeBudget(env0, url.pathname.startsWith('/api/trips/') ? 15 : 0), env = { ...env0, budget }; // 15/min bleiben für die Abfahrten am Bahnhof
     const path = url.pathname.slice(4), q = url.searchParams;
     try {
       let m;

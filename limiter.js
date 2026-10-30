@@ -2,11 +2,11 @@
 export class SlidingWindow {
   constructor(limit = 60, windowMs = 60000) { this.limit = limit; this.windowMs = windowMs; this.log = []; this.until = 0; }
   prune(now) { const from = now - this.windowMs; let i = 0; while (i < this.log.length && this.log[i] <= from) i++; if (i) this.log.splice(0, i); }
-  /** bis zu n Freigaben; gibt die Anzahl der gewährten zurück */
-  take(n, now = Date.now()) {
+  /** bis zu n Freigaben; gibt die Anzahl der gewährten zurück. reserve: so viele Freigaben bleiben für Wichtigeres frei */
+  take(n, now = Date.now(), reserve = 0) {
     this.prune(now);
     if (now < this.until) return 0;
-    const k = Math.max(0, Math.min(n, this.limit - this.log.length));
+    const k = Math.max(0, Math.min(n, this.limit - reserve - this.log.length));
     for (let i = 0; i < k; i++) this.log.push(now);
     return k;
   }

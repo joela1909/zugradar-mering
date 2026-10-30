@@ -17,3 +17,10 @@ test('zurückgeben und pausieren', () => {
   w.pause(5000, 0); assert.equal(w.take(1, 1000), 0); assert.equal(w.take(1, 5001), 1);
   assert.ok(w.nextFree(5001) === 0);
 });
+
+test('Reserve: Fahrtverläufe lassen Freigaben für die Abfahrten übrig', () => {
+  const w = new SlidingWindow(60, 60000);
+  assert.equal(w.take(100, 0, 15), 45);        // Fahrtverlauf: höchstens 45
+  assert.equal(w.take(6, 1, 15), 0);           // weiterer Fahrtverlauf: nichts mehr
+  assert.equal(w.take(6, 2), 6);               // Abfahrten bekommen die Reserve
+});

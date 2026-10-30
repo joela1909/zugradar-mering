@@ -13,13 +13,12 @@ export const histKey = (line, planned) => `${line}|${String(planned.getHours()).
 /**
  * Erwartete Verspätung am Bahnhof (Min).
  * live: aktuell prognostizierte Verspätung (Min) oder null, stopsAway: Halte bis zum Bahnhof,
- * hist: Verlauf (Min). Je näher der Zug, desto stärker zählt die Live-Prognose.
+ * hist: Verlauf (Min). Live-Werte der Bahn haben Vorrang; die Historie zählt nur ohne Live-Daten.
  */
 export function expectedDelay({ live, stopsAway, hist }) {
   const hm = hist.length >= 3 ? median(hist) : null;
   if (live == null) return { min: hm ?? 0, basis: hm == null ? 'Fahrplan' : `Historie (${hist.length}×)` };
-  if (hm == null) return { min: live, basis: 'Live-Prognose' };
-  const w = Math.max(0.35, Math.min(0.95, 0.95 - 0.1 * stopsAway)); // Gewicht Live
-  return { min: w * live + (1 - w) * hm, basis: `Live ${Math.round(w * 100)} % + Historie` };
+  // Liegt eine Live-Prognose der Bahn vor, wird genau sie angezeigt (die eigene Historie nur als Hinweis)
+  return { min: live, basis: hm == null ? 'Live (DB)' : `Live (DB) · sonst meist ${hm >= 0.5 ? '+' + Math.round(hm) : 'pünktlich'}` };
 }
 export { median };

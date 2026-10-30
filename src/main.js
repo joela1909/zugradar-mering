@@ -462,12 +462,13 @@ function fitAll() {
 
 function prediction() {
   const tr = S.tr; if (!tr || tr.stopIdx < 0) return null;
-  const st = tr.raw.stopovers[tr.stopIdx], dep = tr.dep;
-  const plannedDep = st.plannedDep || dep.planned, plannedArr = st.plannedArr || plannedDep;
+  // Abfahrt am eigenen Bahnhof aus der jüngsten Abfahrtsabfrage (alle 8 s) – der Fahrtverlauf kann älter sein
+  const st = tr.raw.stopovers[tr.stopIdx], dep = groupOf(tr.dep.tripId) || tr.dep;
+  const plannedDep = dep.planned || st.plannedDep, plannedArr = st.plannedArr || plannedDep;
   const now = new Date();
   const passed = tr.raw.stopovers.filter((s, i) => i < tr.stopIdx && (s.dep || s.arr) < now).length;
   const stopsAway = Math.max(0, tr.stopIdx - passed);
-  const liveDelay = st.depDelay ?? st.arrDelay ?? dep.delay;
+  const liveDelay = dep.delay ?? st.depDelay ?? st.arrDelay;
   const key = histKey(dep.line, plannedDep);
   let hist = []; try { hist = JSON.parse(localStorage.getItem('zugradar.history.v1'))?.[key] || []; } catch {}
   const e = expectedDelay({ live: liveDelay, stopsAway, hist });
