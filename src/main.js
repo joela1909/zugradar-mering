@@ -547,7 +547,7 @@ function renderList(list) {
       <span class="chip ${d.cancelled ? 'late' : cls(m)}">${d.cancelled ? 'Ausfall' : m >= 1 ? '+' + Math.round(m) : '±0'}</span></button>`;
   };
   const rows = next.map(d => row(d, false)).join('');
-  const pastRows = past.length ? `<div class="bpast"><div class="sub bsep">Zuletzt abgefahren</div>${past.map(d => row(d, true)).join('')}</div>` : '';
+  const pastRows = past.length ? `<div class="bpast"><div class="sub bsep" title="Die kostenlose Bahn-Schnittstelle meldet nach der Abfahrt keine gemessene Zeit, nur die letzte Prognose">Zuletzt abgefahren · letzte Prognose der Bahn</div>${past.map(d => row(d, true)).join('')}</div>` : '';
   return `<div class="bh"><b>Nächste Verbindungen</b><span class="sub">Richtung ${DIRS[S.dir]}</span></div>${pastRows}<div class="blist">${rows || '<div class="sub" style="padding:8px 4px">Keine weiteren Verbindungen.</div>'}</div>`;
 }
 
