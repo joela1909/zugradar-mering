@@ -151,7 +151,7 @@ export function createTrainLayer(maplibregl) {
       this.renderer.autoClear = false;
     },
     render(gl, args) {
-      if (!state.lonlat || !state.visible) return;
+      if (!state.lonlat || !state.visible) { state.box = null; return; }
       const mc = maplibregl.MercatorCoordinate.fromLngLat(state.lonlat, 0);
       // Größe an den Zoom anpassen: gleichmäßig vergrößert (nie gestaucht), weiter draußen weniger Wagen;
       // ca. WIDTH_PX breit, aber höchstens MAX_LEN_PX lang (dann schmaler, mindestens MIN_WIDTH_PX)

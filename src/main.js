@@ -244,7 +244,8 @@ function trainLabelRect() {
 }
 // im render-Ereignis, also im selben Bild wie der Zug gezeichnet wird – sonst läuft das Label ein Bild voraus und zittert
 function placeTrainLabel() {
-  const ll = train3d.state.lonlat, r = trainLabelRect(); if (!r || !ll || !S.trainLabel) return;
+  if (S.trainLabel) S.trainLabel.getElement().style.visibility = trainIncomplete() ? 'hidden' : '';
+  const ll = train3d.state.lonlat, r = trainLabelRect(); if (!r || !ll || !S.trainLabel || trainIncomplete()) return;
   S.trainLabel.setLngLat(ll);
   const p = map.project(ll);
   S.trainLabel.getElement().style.display = '';
@@ -367,7 +368,10 @@ async function selectTrip(id, fit, soft = false) {
   // Gleicher Zug beim automatischen Aktualisieren: nur Zeiten erneuern, nichts neu aufbauen (kein Springen, kein Flackern)
   if (soft && dep && S.tr?.dep?.tripId === id) {
     try {
-      const t = S.live ? await api.trip(id, S.station) : await S.demo.trip(id);
+      let t = S.live ? await api.trip(id, S.station) : await S.demo.trip(id);
+      // unvollständige Antwort (z. B. Bahn-Kontingent knapp, Halte fehlen): bekannte Halte behalten, nur vorhandene Zeiten übernehmen
+      const old = S.tr.raw.stopovers, got = new Map(t.stopovers.map(s => [s.name, s]));
+      if (old.length > t.stopovers.length && t.stopovers.every(s => old.some(o => o.name === s.name))) t = { ...t, stopovers: old.map(o => got.get(o.name) || o) };
       const sig = x => x.stopovers.map(s => s.name).join('|');
       if (S.sel === id && sig(t) === sig(S.tr.raw)) {
         const line = S.railLines.get(id) || t.polyline;
@@ -829,8 +833,10 @@ const TRAIN_SVG = `<svg viewBox="0 0 28 84" width="28" height="84" aria-hidden="
 <path d="M9 10c0-3 2.2-5 5-5s5 2 5 5v5H9z" fill="#2c2c2e"/><rect x="10" y="20" width="8" height="5" rx="2" fill="#e5e5ea"/><rect x="10" y="38" width="8" height="5" rx="2" fill="#e5e5ea"/><rect x="10" y="62" width="8" height="5" rx="2" fill="#e5e5ea"/></g></svg>`;
 
 // Das 3D-Modell ist immer sichtbar (größenangepasst), das flache Symbol bleibt verborgen
+// Fehlen im Fahrtverlauf die Halte vor dem eigenen Bahnhof, ist die Position unbekannt: Zug ausblenden statt falsch zeichnen
+const trainIncomplete = () => !!S.tr && S.tr.stopIdx === 0 && (S.tr.dep?.previousStops?.length || 0) > 0;
 function syncTrainLook() {
-  train3d.state.visible = true;
+  train3d.state.visible = !trainIncomplete();
   if (S.trainMarker) S.trainMarker.getElement().style.visibility = 'hidden';
   map.triggerRepaint();
 }
