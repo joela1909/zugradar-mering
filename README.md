@@ -27,3 +27,10 @@ Hochzoll – Kissing – Mering-St Afra – Mering – Althegnenberg ist fest hi
 ## Bahn-Kontingent
 
 Die DB-Timetables-API erlaubt 60 Anfragen pro Minute. Ein Durable Object (`RateLimiter` in `worker.js`, Fenster in `limiter.js`) zählt alle Bahn-Anfragen aller Geräte in einem gleitenden 60-Sekunden-Fenster und gibt genau so viele frei (`DB_RATE_LIMIT`, Standard 60). Ist das Kontingent erschöpft, liefert der Worker die zuletzt gespeicherte Antwort. Echtzeitdaten werden frühestens alle 10 s neu geholt, die Halte nahe Mering-St Afra zuerst. `/api/limit` zeigt die aktuelle Auslastung.
+
+## Straße: Verkehr, Ampeln, Blitzer
+
+- **Routen**: Auto-Routen mit Alternativen zur Auswahl (OSRM + Valhalla, beide OpenStreetMap). Zu jeder Route: Fahrzeit, Länge, Zahl der Ampeln und Blitzer.
+- **Live-Verkehr** (optional): mit dem Worker-Secret `TOMTOM_API_KEY` (kostenloser Schlüssel von developer.tomtom.com, 2.500 Abrufe/Tag) rechnet der Server die Routen mit aktueller Verkehrslage (`/api/traffic/route`), färbt Stau-Abschnitte ein, liefert Meldungen (`/api/traffic/incidents`) und eine Verkehrsfluss-Ebene (`/api/traffic/tiles/…`). Ohne Schlüssel: Fahrzeiten ohne Verkehr, Meldungen nur für die A8 (offene Daten der Autobahn GmbH).
+- **Ampeln**: Standorte aus OpenStreetMap (`src/data/signals.json`, neu bauen mit `node scripts/build-road-data.mjs`). Live-Schaltzeiten veröffentlicht für diese Region niemand. Die App lernt deshalb bei jeder Fahrt mit Routenführung je Ampel, wie oft und wie lange man wartet und wann es grün wurde (`src/road.js`, gespeichert auf dem Gerät). Bei genug Beobachtungen einer Festzeit-Ampel schätzt sie die Umlaufzeit und zeigt „Grün in ~x s (geschätzt)".
+- **Blitzer**: feste Anlagen aus OpenStreetMap (`src/data/cameras.json`), mobile nur über eigene Meldungen („Blitzer melden", `/api/reports`, 3 Stunden gültig). Hinweis: Wer fährt, darf Blitzerwarnungen während der Fahrt nicht nutzen (§ 23 Abs. 1c StVO).

@@ -11,4 +11,8 @@ export const ICON = {
   chevronUp: svg('<path d="M6 15l6-6 6 6"/>'),
   chevronDown: svg('<path d="M6 9l6 6 6-6"/>'),
   swap: svg('<path d="M7 7h11l-3-3M17 17H6l3 3"/>'),
+  signal: svg('<rect x="8" y="2.5" width="8" height="19" rx="3"/><circle cx="12" cy="7" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="17" r="1.4" fill="currentColor" stroke="none"/>'),
+  camera: svg('<rect x="3" y="7" width="13" height="10" rx="2"/><path d="M16 10.5l5-2.5v8l-5-2.5"/>'),
+  warn: svg('<path d="M12 4 21 19H3z"/><path d="M12 10v4M12 16.6v.4"/>'),
+  traffic: svg('<path d="M5 20 9 4M19 20 15 4M12 5v3M12 11v3M12 17v3"/>'),
 };

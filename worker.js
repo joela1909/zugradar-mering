@@ -1,6 +1,7 @@
 import stations from './stations.json';
 import { SlidingWindow } from './limiter.js';
 import { buildGraph, shortestPath, thin, overpassQuery } from './rail.js';
+import { parseTomTomRoutes, parseTomTomIncidents, parseAutobahn, parseLL, addReport } from './traffic.js';
 import { trackWindow, hourShifts, parseTime, parseTimetable, parseStations, merge, toDepartures, toStopover, planPath, addHours, tripKey, splitPath } from './iris.js';
 
 const BASE = 'https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1';
@@ -24,9 +25,17 @@ async function cached(key, ttl, fn) {
 // ---- Bahn-Kontingent: genau DB_RATE_LIMIT (Standard 60) Anfragen pro gleitender Minute, für alle Geräte zusammen ----
 // Zentraler Zähler als Durable Object; jede Worker-Anfrage holt sich Freigaben in kleinen Paketen und gibt Reste zurück.
 export class RateLimiter {
-  constructor(state, env) { this.w = new SlidingWindow(Number(env.DB_RATE_LIMIT) || 60, 60000); }
+  constructor(state, env) { this.state = state; this.w = new SlidingWindow(Number(env.DB_RATE_LIMIT) || 60, 60000); }
   async fetch(req) {
     const u = new URL(req.url), n = Number(u.searchParams.get('n')) || 0, r = Number(u.searchParams.get('r')) || 0;
+    // eigene Blitzer-Meldungen (Instanz „reports“): dauerhaft gespeichert, laufen nach 3 Stunden ab
+    if (u.pathname === '/reports') {
+      let list = addReport((await this.state.storage.get('reports')) || [], null);
+      if (req.method === 'POST') { const b = await req.json(); list = addReport(list, { lonlat: b.lonlat }); }
+      if (req.method === 'DELETE') list = list.filter(x => x.id !== u.searchParams.get('id'));
+      if (req.method !== 'GET') await this.state.storage.put('reports', list);
+      return Response.json({ reports: list });
+    }
     if (u.pathname === '/take') return Response.json({ k: this.w.take(n, Date.now(), r) });
     if (u.pathname === '/give') { this.w.give(n); return Response.json({ ok: true }); }
     if (u.pathname === '/pause') { this.w.pause(n); return Response.json({ ok: true }); }
@@ -211,10 +220,80 @@ async function trip(env, tripId) {
   return { trip: { id: tripId, stopovers, start } };
 }
 
+// ---- Straßenverkehr: TomTom (Live-Verkehr, braucht den Worker-Secret TOMTOM_API_KEY), sonst Meldungen der Autobahn-API ----
+const REGION = [10.3, 47.8, 11.9, 48.8]; // nur Anfragen im Großraum Augsburg/München-West (schont das Kontingent)
+const inRegion = ll => ll && ll[0] >= REGION[0] && ll[0] <= REGION[2] && ll[1] >= REGION[1] && ll[1] <= REGION[3];
+const TT = 'https://api.tomtom.com';
+async function trafficRoute(env, q) {
+  const a = parseLL(q.get('from')), b = parseLL(q.get('to'));
+  if (!inRegion(a) || !inRegion(b)) throw new ApiError('Start oder Ziel außerhalb des Gebiets', 400);
+  if (!env.TOMTOM_API_KEY) throw new ApiError('Kein Live-Verkehr eingerichtet (TOMTOM_API_KEY fehlt)', 501);
+  const r4 = x => x.toFixed(4), key = `tt-route:${r4(a[0])},${r4(a[1])}:${r4(b[0])},${r4(b[1])}`;
+  const text = await cached(key, 90, async () => {
+    const u = `${TT}/routing/1/calculateRoute/${a[1]},${a[0]}:${b[1]},${b[0]}/json?traffic=true&maxAlternatives=2&travelMode=car&routeType=fastest&computeTravelTimeFor=all&sectionType=traffic&key=${env.TOMTOM_API_KEY}`;
+    const res = await fetch(u, { headers: { 'user-agent': UA } });
+    if (!res.ok) throw new ApiError(`TomTom ${res.status}`, res.status === 403 || res.status === 429 ? 503 : 502);
+    return JSON.stringify({ provider: 'tomtom', routes: parseTomTomRoutes(await res.json()) });
+  });
+  return JSON.parse(text);
+}
+async function trafficIncidents(env) {
+  const text = await cached('incidents:' + (env.TOMTOM_API_KEY ? 'tt' : 'ab'), 120, async () => {
+    if (env.TOMTOM_API_KEY) {
+      const fields = '{incidents{type,geometry{type,coordinates},properties{iconCategory,magnitudeOfDelay,events{description},from,to,delay}}}';
+      const res = await fetch(`${TT}/traffic/services/5/incidentDetails?bbox=10.70,48.15,11.10,48.47&language=de-DE&timeValidityFilter=present&fields=${encodeURIComponent(fields)}&key=${env.TOMTOM_API_KEY}`, { headers: { 'user-agent': UA } });
+      if (res.ok) return JSON.stringify({ provider: 'tomtom', incidents: parseTomTomIncidents(await res.json()) });
+    }
+    // ohne Schlüssel: Stau, Sperrungen und Baustellen der A8 (offene Daten der Autobahn GmbH)
+    const parts = await Promise.all(['warning', 'closure', 'roadworks'].map(k => fetch(`https://verkehr.autobahn.de/o/autobahn/A8/services/${k}`, { headers: { 'user-agent': UA } }).then(r => (r.ok ? r.json() : {})).catch(() => ({}))));
+    return JSON.stringify({ provider: 'autobahn', incidents: parseAutobahn(Object.assign({}, ...parts), [10.5, 48.1, 11.6, 48.6]) });
+  });
+  return JSON.parse(text);
+}
+// Verkehrsfluss-Kacheln (farbige Linien) über den Worker, damit der Schlüssel nicht im Browser landet
+async function trafficTile(env, z, x, y) {
+  if (!env.TOMTOM_API_KEY) return new Response('kein Live-Verkehr', { status: 501 });
+  const n = 2 ** z, lon = x / n * 360 - 180, lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))) * 180 / Math.PI;
+  if (z < 8 || z > 17 || lon < REGION[0] - 1 || lon > REGION[2] + 1 || lat < REGION[1] - 1 || lat > REGION[3] + 1) return new Response('außerhalb', { status: 404 });
+  const cache = caches.default, key = new Request(`https://cache.local/tt-tile/${z}/${x}/${y}`);
+  const hit = await cache.match(key); if (hit) return hit;
+  const res = await fetch(`${TT}/traffic/map/4/tile/flow/relative0/${z}/${x}/${y}.png?tileSize=256&thickness=6&key=${env.TOMTOM_API_KEY}`);
+  if (!res.ok) return new Response('TomTom ' + res.status, { status: 502 });
+  const out = new Response(res.body, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=120' } });
+  await cache.put(key, out.clone());
+  return out;
+}
+async function reports(env, req, url) {
+  if (!env.LIMITER) return json({ reports: [] }, 200, 0);
+  const stub = env.LIMITER.get(env.LIMITER.idFromName('reports'));
+  if (req.method === 'POST') {
+    const b = await req.json().catch(() => null), ll = Array.isArray(b?.lonlat) ? parseLL(b.lonlat.join(',')) : null;
+    if (!inRegion(ll)) throw new ApiError('Ort außerhalb des Gebiets', 400);
+    return json(await (await stub.fetch('https://limiter/reports', { method: 'POST', body: JSON.stringify({ lonlat: ll }) })).json(), 200, 0);
+  }
+  if (req.method === 'DELETE') return json(await (await stub.fetch('https://limiter/reports?id=' + encodeURIComponent(url.searchParams.get('id') || ''), { method: 'DELETE' })).json(), 200, 0);
+  return json(await (await stub.fetch('https://limiter/reports')).json(), 200, 0);
+}
+async function roadApi(req, env, url) {
+  const p = url.pathname.slice(4);
+  try {
+    let m;
+    if (p === '/traffic/status') return json({ provider: env.TOMTOM_API_KEY ? 'tomtom' : null }, 200, 60);
+    if (p === '/traffic/route') return json(await trafficRoute(env, url.searchParams), 200, 60);
+    if (p === '/traffic/incidents') return json(await trafficIncidents(env), 200, 120);
+    if ((m = p.match(/^\/traffic\/tiles\/(\d+)\/(\d+)\/(\d+)\.png$/))) return trafficTile(env, +m[1], +m[2], +m[3]);
+    if (p === '/reports') return await reports(env, req, url);
+  } catch (e) {
+    return json({ error: e instanceof ApiError ? e.message : 'Fehler', detail: String(e?.message || e).slice(0, 160) }, e?.status || 502, 0);
+  }
+  return null;
+}
+
 export default {
   async fetch(req, env0, ctx) {
     const url = new URL(req.url);
     if (!url.pathname.startsWith('/api/')) return env0.ASSETS.fetch(req);
+    if (/^\/api\/(traffic|reports)/.test(url.pathname)) { const r = await roadApi(req, env0, url); if (r) return r; }
     const budget = makeBudget(env0, url.pathname.startsWith('/api/trips/') ? 15 : 0), env = { ...env0, budget }; // 15/min bleiben für die Abfahrten am Bahnhof
     const path = url.pathname.slice(4), q = url.searchParams;
     try {

@@ -146,3 +146,47 @@ export async function rail(a, b, aLL, bLL, label = `${a} → ${b}`) {
 
 /** Auslastung des Bahn-Kontingents (Anfragen der letzten Minute) */
 export async function limit() { return j(`${BASE}/limit`, { cache: 'no-store' }); }
+
+/* ---------- Straße: Routen mit Alternativen, Live-Verkehr, Meldungen, eigene Blitzer-Meldungen ---------- */
+/** Valhalla-Polyline (6 Nachkommastellen) → [[lon,lat]] */
+export function decodePolyline6(str) {
+  const out = []; let i = 0, lat = 0, lon = 0;
+  const next = () => { let r = 0, s = 0, b; do { b = str.charCodeAt(i++) - 63; r |= (b & 31) << s; s += 5; } while (b >= 32); return r & 1 ? ~(r >> 1) : r >> 1; };
+  while (i < str.length) { lat += next(); lon += next(); out.push([lon / 1e6, lat / 1e6]); }
+  return out;
+}
+const geoLen = c => { let d = 0; for (let i = 1; i < c.length; i++) d += Math.hypot((c[i][0] - c[i - 1][0]) * 111320 * Math.cos(c[i][1] * Math.PI / 180), (c[i][1] - c[i - 1][1]) * 111320); return d; };
+// gleiche Strecke? (Länge ähnlich und Mittelpunkt nah beieinander)
+const similar = (a, b) => Math.abs(a.meters - b.meters) < 0.04 * a.meters && Math.hypot((a.coords[a.coords.length >> 1][0] - b.coords[b.coords.length >> 1][0]) * 74000, (a.coords[a.coords.length >> 1][1] - b.coords[b.coords.length >> 1][1]) * 111320) < 400;
+let trafficOff = 0; // Zeitpunkt, bis zu dem der Live-Verkehr nicht erneut versucht wird (kein Schlüssel / Störung)
+/**
+ * Routen von a nach b: { list: [{coords, meters, seconds, delay, noTraffic, jams, geo}], traffic: 'tomtom' | null }.
+ * Auto: mit Live-Verkehr über den eigenen Server (TomTom), sonst OSRM + Alternativen von Valhalla (beides OpenStreetMap, ohne Verkehr).
+ */
+export async function routes(mode, from, to) {
+  const fin = (list, traffic) => ({ list: list.map(r => ({ delay: 0, noTraffic: null, jams: [], ...r, geo: geoLen(r.coords) })), traffic });
+  if (mode === 'car' && Date.now() > trafficOff) {
+    try {
+      const r = await j(`${BASE}/traffic/route?from=${from[0].toFixed(5)},${from[1].toFixed(5)}&to=${to[0].toFixed(5)},${to[1].toFixed(5)}`);
+      if (r.routes?.length) return fin(r.routes, r.provider);
+    } catch (e) { trafficOff = Date.now() + (/^501/.test(e.message) ? 30 : 3) * 60000; }
+  }
+  const main = await route(mode, from, to), list = [main];
+  if (mode === 'car') {
+    try {
+      const q = { locations: [{ lon: from[0], lat: from[1] }, { lon: to[0], lat: to[1] }], costing: 'auto', alternates: 2, units: 'kilometers' };
+      const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 6000);
+      const v = await j('https://valhalla1.openstreetmap.de/route?json=' + encodeURIComponent(JSON.stringify(q)), { signal: ctl.signal }).finally(() => clearTimeout(tm));
+      const trips = [v.trip, ...(v.alternates || []).map(a => a.trip)].map(t => ({ coords: t.legs.flatMap(l => decodePolyline6(l.shape)), meters: t.summary.length * 1000, seconds: t.summary.time }));
+      const same = trips.find(t => similar(main, t)), k = same ? main.seconds / same.seconds : 1; // Zeiten an die Hauptroute angleichen
+      for (const t of trips) if (!list.some(x => similar(x, t))) list.push({ ...t, seconds: t.seconds * k });
+      list.sort((x, y) => x.seconds - y.seconds);
+    } catch {}
+  }
+  return fin(list, null);
+}
+export const trafficStatus = () => j(`${BASE}/traffic/status`);
+export const incidents = () => j(`${BASE}/traffic/incidents`);
+export const getReports = () => j(`${BASE}/reports`).then(r => r.reports || []);
+export const addReport = lonlat => j(`${BASE}/reports`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ lonlat }) }).then(r => r.reports || []);
+export const delReport = id => j(`${BASE}/reports?id=${encodeURIComponent(id)}`, { method: 'DELETE' }).then(r => r.reports || []);

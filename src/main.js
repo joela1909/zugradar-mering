@@ -10,6 +10,9 @@ import { createGpsFilter } from './gps.js';
 import { ICON } from './icons.js';
 import { corridorSegment } from './tracks.js';
 import { viaStations } from './lines.js';
+import { signalsOn, camerasOn, signalStats, nextGreenIn, createSignalLearner, recordSignal } from './road.js';
+import SIGNALS from './data/signals.json';
+import CAMERAS from './data/cameras.json';
 import { dirOf, matchesDir, couple, startName, timeProgress, distProgress, minutesUntil, buffer, stopFractions, livery } from './progress.js';
 
 const HOME_ADDRESS = 'Koloniestraße 26, 86399 Bobingen';
@@ -28,6 +31,9 @@ const store = { get: (k, f) => { try { return JSON.parse(localStorage.getItem(k)
 const MODES = { car: [ICON.car, 'Auto'], bike: [ICON.bike, 'Rad'], foot: [ICON.foot, 'zu Fuß'] };
 
 let liveError = '';
+// Straße: Routen zur Auswahl, Live-Verkehr, Ampeln, Blitzer, Meldungen, gelernte Ampel-Wartezeiten
+const R = { routes: [], idx: 0, picked: false, traffic: null, provider: null, overlay: false, reports: [], incidents: [], sig: {}, markers: [], warned: new Set(), learner: createSignalLearner(), along: null, lastFix: null };
+R.sig = store.get('zr.signals.v1', {}); R.overlay = store.get('zr.traffic', false);
 const S = { station: api.FALLBACK_STATION, deps: [], sel: null, tr: null, live: false, demo: null, home: store.get('zr.home2', HOME_FALLBACK), mode: store.get('zr.mode2', 'car'), walk: null, trainMarker: null, sheet: 'half', sheetVis: 220, loading: true, updated: null, limit: null, strict: store.get('zr.strict', true), fitFull: false, nav: false, follow: true, walkRemain: null, wake: null, meShown: null, meAnim: null, camTarget: null, railLines: new Map(), stopLabels: [], d3: store.get('zr.3d', true), markers: [], dir: store.get('zr.dir', 'muenchen'), me: null, meMarker: null, track: store.get('zr.track', false), trackTotal: 0, watch: null, lastRoute: { ll: null, t: 0 } };
 const vis = () => couple(S.deps.filter(d => (S.strict ? matchesDir(d, S.dir) : dirOf(d) === S.dir)));
 const parts = d => [d, ...(d?.coupled || [])];
@@ -71,7 +77,7 @@ function applyTheme() {
   let layers = []; try { layers = map.getStyle().layers; } catch { return; }
   for (const l of layers) {
     const id = l.id, t = l.type;
-    if (['rail', 'walk', 'buildings-3d'].includes(l.source) || l.type === 'custom' || id.startsWith('rail') || id.startsWith('walk') || id === 'buildings-3d') continue;
+    if (['rail', 'walk', 'walkalt', 'flow', 'buildings-3d'].includes(l.source) || l.type === 'custom' || id.startsWith('rail') || id.startsWith('walk') || id === 'buildings-3d') continue;
     if (t === 'background') set(id, 'background-color', P.land);
     else if (t === 'fill') {
       if (/water/.test(id)) set(id, 'fill-color', P.water);
@@ -139,6 +145,8 @@ async function ensureLayers() {
   add3D();
   map.addSource('rail', { type: 'geojson', data: emptyFC, lineMetrics: true });
   map.addSource('walk', { type: 'geojson', data: emptyFC });
+  map.addSource('walkalt', { type: 'geojson', data: emptyFC });
+  map.addLayer({ id: 'walk-alt', type: 'line', source: 'walkalt', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#8e8e93', 'line-width': 4, 'line-opacity': .55 } });
   map.addLayer({ id: 'walk-case', type: 'line', source: 'walk', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#fff', 'line-width': 9 } });
   map.addLayer({ id: 'walk', type: 'line', source: 'walk', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['coalesce', ['get', 'color'], '#0066cc'], 'line-width': 5 } });
   const zw = (a, b, c) => ['interpolate', ['linear'], ['zoom'], 9, a, 13, b, 16, c];
@@ -293,23 +301,106 @@ async function loadHome() {
 function drawWalk() {
   const src = map.getSource('walk'); if (!src || !S.walk) return;
   const r = S.nav && S.me ? splitRoute(S.walk.coords, S.me) : null;
-  src.setData(r ? { type: 'FeatureCollection', features: [lineFeat(r.done, { color: '#8e8e93' }), lineFeat(r.rest, { color: '#0a84ff' })] } : lineFeat(S.walk.coords));
+  const feats = r ? [lineFeat(r.done, { color: '#8e8e93' }), lineFeat(r.rest, { color: '#0a84ff' })] : [lineFeat(S.walk.coords)];
+  // Stau-Abschnitte (Live-Verkehr) einfärben: leicht → orange, stark → rot, gesperrt → dunkelrot
+  for (const jm of S.walk.jams || []) feats.push(lineFeat(S.walk.coords.slice(jm.from, jm.to + 1), { color: jm.cat === 'ROAD_CLOSURE' ? '#8e0000' : jm.mag >= 3 ? '#ff3b30' : jm.mag >= 2 ? '#ff6b00' : '#ff9f0a' }));
+  src.setData({ type: 'FeatureCollection', features: feats });
+  map.getSource('walkalt')?.setData({ type: 'FeatureCollection', features: S.nav ? [] : R.routes.filter((_, i) => i !== R.idx).map(x => lineFeat(x.coords)) });
+}
+// Ampeln, Blitzer und gelernte Wartezeit einer Route
+function roadInfo(r) {
+  r.signals = S.mode === 'foot' ? [] : signalsOn(r.coords, SIGNALS);
+  r.cams = S.mode === 'car' ? camerasOn(r.coords, CAMERAS, R.reports) : [];
+  r.learned = r.signals.reduce((s, x) => s + (signalStats(R.sig[x.id])?.expected || 0), 0);
+  r.base ??= r.seconds;
+  r.seconds = r.base + (R.traffic || S.mode !== 'car' ? 0 : r.learned); // ohne Live-Verkehr: gelernte Ampel-Wartezeit aufschlagen
+  return r;
+}
+// zuvor gewählte Route in der neuen Liste wiederfinden (sonst die schnellste)
+function pickRoute(prev) {
+  if (!R.picked || !prev || prev.coords.length < 4) return 0;
+  const n = prev.coords.length, probe = [.5, .75, .9].map(f => prev.coords[Math.floor(n * f)]);
+  const i = R.routes.findIndex(x => probe.every(p => x.coords.some(q => Math.abs(q[0] - p[0]) < 0.002 && Math.abs(q[1] - p[1]) < 0.0014)));
+  return i >= 0 ? i : 0;
+}
+const km = m => (m / 1000).toFixed(1).replace('.', ',');
+// Marker der gewählten Route: Ampeln, Blitzer (fest/gemeldet), Verkehrsmeldungen
+function placeRoad() {
+  R.markers.forEach(m => m.remove()); R.markers = [];
+  const add = (e, ll, z) => { const m = mk(e, ll); e.style.zIndex = z; R.markers.push(m); };
+  for (const s of S.walk?.signals || []) add(el('sig', '<i></i><i></i><i></i>'), s.lonlat, 1);
+  for (const c of S.walk?.cams || []) {
+    const e = el('cam' + (c.kind === 'gemeldet' ? ' rep' : ''), `${ICON.camera}${c.limit ? `<b>${c.limit}</b>` : ''}`);
+    e.title = c.kind === 'gemeldet' ? 'Gemeldeter Blitzer – antippen zum Löschen' : 'Fester Blitzer (OpenStreetMap)';
+    if (c.id) e.onclick = ev => { ev.stopPropagation(); api.delReport(c.id).then(l => { R.reports = l; refreshCams(); toast('Meldung gelöscht'); }).catch(() => {}); };
+    add(e, c.lonlat, 5);
+  }
+  for (const i of R.incidents) { const e = el('inc' + (i.closed ? ' closed' : ''), ICON.warn); e.onclick = ev => { ev.stopPropagation(); toast(`${i.kind}: ${i.text}${i.delay >= 60 ? ` · +${Math.round(i.delay / 60)} min` : ''}`, 8000); }; add(e, i.lonlat, 2); }
+}
+function refreshCams() { R.routes.forEach(roadInfo); placeRoad(); render(); }
+// gewählte Route anzeigen: Linie, Fahrzeit-Label, Marker
+function showWalk() {
+  S.walkRemain = null; R.warned.clear(); R.learner.reset(); drawWalk();
+  labels = labels.filter(l => l.marker !== walkMarker);
+  walkMarker?.remove();
+  const mid = S.walk.coords[Math.floor(S.walk.coords.length / 2)];
+  walkMarker = mk(el('lbl route', `${MODES[S.mode][0]} ${Math.ceil(S.walk.seconds / 60)} min · ${(S.walk.meters / 1000).toFixed(1)} km${S.walk.delay >= 60 ? ` · +${Math.round(S.walk.delay / 60)} Stau` : ''}`), mid);
+  walkMarker._zr = { marker: walkMarker, ll: mid, prio: 2, onWalk: true }; labels.push(walkMarker._zr);
+  placeRoad(); layout();
 }
 const remainM = () => S.walkRemain ?? S.walk?.meters ?? 0;
 const remainS = () => (S.walk ? S.walk.seconds * (S.walk.meters ? remainM() / S.walk.meters : 1) : 0);
 async function loadWalk() {
   await ensureLayers();
   const from = S.me || S.home;
-  try { S.walk = await api.route(S.mode, from, dest()); }
-  catch { const m = dist(from, dest()) * 1.3; S.walk = { coords: [from, dest()], meters: m, seconds: m / ({ foot: 1.33, bike: 4.2, car: 11 }[S.mode]) }; }
-  S.walkRemain = null; drawWalk();
+  const prev = S.walk;
+  let res;
+  try { res = await api.routes(S.mode, from, dest()); }
+  catch { const m = dist(from, dest()) * 1.3; res = { list: [{ coords: [from, dest()], meters: m, seconds: m / ({ foot: 1.33, bike: 4.2, car: 11 }[S.mode]), delay: 0, jams: [], geo: m }], traffic: null }; }
+  R.traffic = res.traffic; R.routes = res.list.map(roadInfo);
+  R.idx = pickRoute(prev); S.walk = R.routes[R.idx];
   S.lastRoute = { ll: from, t: Date.now() };
   if (S.me && (!S.trackTotal || S.walk.meters > S.trackTotal)) S.trackTotal = S.walk.meters;
-  labels = labels.filter(l => l.marker !== walkMarker);
-  walkMarker?.remove();
-  const mid = S.walk.coords[Math.floor(S.walk.coords.length / 2)];
-  walkMarker = mk(el('lbl route', `${MODES[S.mode][0]} ${Math.ceil(S.walk.seconds / 60)} min · ${(S.walk.meters / 1000).toFixed(1)} km`), mid);
-  walkMarker._zr = { marker: walkMarker, ll: mid, prio: 2, onWalk: true }; labels.push(walkMarker._zr); layout();
+  showWalk();
+}
+// Hinweis in der Routenführung: nächste Ampel (gelernte Wartezeit bzw. geschätzte Grünphase) und Blitzer voraus
+function updateAhead() {
+  const e = $('ahead'), along = R.along; if (!e || !S.walk || along == null) return;
+  const m = d => (d >= 950 ? km(d) + ' km' : Math.max(10, Math.round(d / 10) * 10) + ' m'), parts = [];
+  const cm = (S.walk.cams || []).find(c => c.along > along - 10 && c.along - along < 2000);
+  if (cm) {
+    parts.push(`<span class="minor">${ICON.camera} Blitzer in ${m(cm.along - along)}${cm.limit ? ` · ${cm.limit} km/h` : ''}${cm.kind === 'gemeldet' ? ' · gemeldet' : ''}</span>`);
+    const k = cm.lonlat.join(); if (cm.along - along < 500 && !R.warned.has(k)) { R.warned.add(k); toast(`Blitzer in ${m(cm.along - along)}${cm.limit ? ` · ${cm.limit} km/h` : ''}`, 7000); try { navigator.vibrate?.([120, 80, 120]); } catch {} }
+  }
+  const sg = (S.walk.signals || []).find(s => s.along > along - 5);
+  if (sg) {
+    const st = signalStats(R.sig[sg.id]); let t = `${ICON.signal} Ampel in ${m(sg.along - along)}`;
+    if (st?.cycle && sg.along - along < 800) t += ` · Grün in ~${Math.round(nextGreenIn(st.cycle, Date.now() / 1000))} s <small>(geschätzt)</small>`;
+    else if (st && st.n >= 2) t += st.pStop < 0.15 ? ' · meist frei' : ` · meist ${Math.round(st.avgWait)} s warten`;
+    parts.push(t);
+  }
+  const html = parts.join('<br>'); if (e.innerHTML !== html) e.innerHTML = html;
+}
+const routeMeta = r => [`${km(r.meters)} km`, r.delay >= 60 ? `<span class="late">+${Math.round(r.delay / 60)} min Stau</span>` : R.traffic ? '<span class="ontime">frei</span>' : '',
+  r.signals.length ? `${r.signals.length} Ampel${r.signals.length > 1 ? 'n' : ''}` : '', r.cams.length ? `<span class="minor">${r.cams.length} Blitzer</span>` : ''].filter(Boolean).join(' · ');
+// Routenwahl über dem Start-Knopf (bei nur einer Route eine Infozeile)
+const routeChips = () => (!R.routes.length || !S.walk ? '' : R.routes.length === 1 ? `<div class="rinfo sub">${routeMeta(S.walk)}</div>`
+  : `<div class="rchips">${R.routes.map((r, i) => `<button class="rchip${i === R.idx ? ' sel' : ''}" data-r="${i}"><b>${Math.ceil(r.seconds / 60)} min</b><small>${routeMeta(r)}</small></button>`).join('')}</div>`);
+// Meldungen und eigene Blitzer-Meldungen laden (alle 2 Minuten)
+async function loadRoadData() {
+  if (document.hidden && !S.nav) return;
+  const [rep, inc] = await Promise.all([api.getReports().catch(() => null), api.incidents().catch(() => null)]);
+  const before = JSON.stringify([R.reports, R.incidents]);
+  if (rep) R.reports = rep; if (inc) R.incidents = inc.incidents || [];
+  if (JSON.stringify([R.reports, R.incidents]) !== before) refreshCams();
+}
+// Verkehrsfluss-Ebene (farbige Straßen) ein- und ausblenden
+function setOverlay() {
+  const on = !!(R.overlay && R.provider); $('traf').classList.toggle('on', on);
+  if (on && !map.getSource('flow')) {
+    map.addSource('flow', { type: 'raster', tiles: [location.origin + '/api/traffic/tiles/{z}/{x}/{y}.png'], tileSize: 256, minzoom: 8, maxzoom: 17, attribution: '© TomTom' });
+    map.addLayer({ id: 'flow', type: 'raster', source: 'flow', paint: { 'raster-opacity': .9 } }, 'walk-alt');
+  } else if (!on && map.getLayer('flow')) { map.removeLayer('flow'); map.removeSource('flow'); }
 }
 
 function updateStatus() {
@@ -523,16 +614,19 @@ function render() {
     const eta = S.walk ? new Date(Date.now() + remainS() * 1000) : null;
     peek.innerHTML = `<div class="row top"><span class="navico">${MODES[S.mode][0]}</span><span class="dir">Zum Bahnhof</span>${S.follow ? '' : '<button class="pillbtn" id="recenter">Zentrieren</button>'}</div>
       <div class="times"><span class="big">${fmt(eta)}</span><span class="chip">${Math.ceil(remainS() / 60)} min</span><span class="sub" style="margin-left:auto">${(remainM() / 1000).toFixed(1)} km</span></div>
-      <div class="sub">${p ? `Zug ${lineText(dep)} ab <b>${fmt(p.depT)}</b> · Gl. ${dep.platform}` : ''}</div>`;
-    half.innerHTML = `<div id="prog"></div><button class="navbtn end" id="navend">Beenden</button>`;
+      <div class="sub">${p ? `Zug ${lineText(dep)} ab <b>${fmt(p.depT)}</b> · Gl. ${dep.platform}` : ''}</div><div class="sub ahead" id="ahead"></div>`;
+    half.innerHTML = `<div id="prog"></div><div class="navrow">${S.mode === 'car' ? `<button class="navbtn ghost" id="report">${ICON.camera} Blitzer melden</button>` : ''}<button class="navbtn end" id="navend">Beenden</button></div>`;
   } else {
     peek.innerHTML = `<div class="row top">${badges(dep)}<span class="dir">${dirText(dep)}</span><span class="plat">Gl. ${dep.platform}</span></div>
       <div class="times"><span class="big ${dep.cancelled ? 'late' : cls(dMin)}">${dep.cancelled ? 'fällt aus' : fmt(depShown)}</span>${dep.cancelled ? '' : `${same(depPlan, depShown) ? '' : `<s>${fmt(depPlan)}</s>`}<span class="chip ${cls(dMin)}">${Math.abs(dMin) < 0.5 ? 'pünktlich' : sgn(dMin) + ' min'}</span>`}</div>
       <div class="sub">${leave ? `Spätestens los <b>${fmt(leave)}</b> · ${MODES[S.mode][0]} ${walkMin} min` : 'Weg wird berechnet …'}</div>`;
-    half.innerHTML = `<div id="prog"></div>${S.walk ? `<button class="navbtn" id="navstart">${MODES[S.mode][0]} Route starten</button>` : ''}`;
+    half.innerHTML = `<div id="prog"></div>${routeChips()}${S.walk ? `<button class="navbtn" id="navstart">${MODES[S.mode][0]} Route starten</button>` : ''}`;
   }
   full.innerHTML = S.nav ? renderDetails(dep, p) : renderList(list) + renderTimeline(dep) + renderDetails(dep, p);
   const on = (id, f) => { const b = $(id); if (b) b.onclick = e => { e.stopPropagation(); f(); }; };
+  on('report', () => { if (!S.me) return toast('Standort noch nicht bekannt'); api.addReport(S.me).then(l => { R.reports = l; refreshCams(); toast('Blitzer gemeldet · gilt 3 Stunden'); }).catch(() => toast('Meldung konnte nicht gespeichert werden')); });
+  half.querySelectorAll('.rchip').forEach(b => b.onclick = e => { e.stopPropagation(); R.idx = +b.dataset.r; R.picked = true; S.walk = R.routes[R.idx]; showWalk(); render(); fitAll(); });
+  updateAhead();
   on('navstart', startNav); on('navend', stopNav); on('recenter', () => { S.follow = true; render(); updateNav(); });
   const sig = [dep.tripId, fmt(depShown), dMin, S.nav].join('|'), prevSig = render.sig; render.sig = sig;
   if (prevSig && prevSig !== sig) { const swap = prevSig.split('|')[0] !== dep.tripId; peek.classList.remove('upd', 'swap'); void peek.offsetWidth; peek.classList.add(swap ? 'swap' : 'upd'); }
@@ -585,6 +679,9 @@ function renderDetails(dep, p) {
     !S.nav && kv('Richtungsfilter', `<span class="kvcol"><button id="strictbtn" class="pillbtn">${S.strict ? 'An' : 'Aus'}</button><small>${S.strict ? 'nur Züge ' + RULE[S.dir] : 'alle Züge'}</small></span>`),
     kv('Daten', S.live ? `DB live${S.updated ? ` · ${S.updated.toLocaleTimeString('de-DE', { timeZone: 'Europe/Berlin' })}` : ''}` : 'Demo'),
     S.limit && S.limit.used != null && kv('Bahn-Abfragen', `${S.limit.used} von ${S.limit.limit} pro Minute`),
+    S.mode === 'car' && kv('Verkehr', R.traffic ? `TomTom live · ${S.walk?.delay >= 60 ? `<span class="late">+${Math.round(S.walk.delay / 60)} min</span>` : '<span class="ontime">frei</span>'}` : `<span class="kvcol"><span>ohne Live-Daten</span><small>Fahrzeit aus OpenStreetMap; Live-Verkehr braucht einen kostenlosen TomTom-Schlüssel</small></span>`),
+    S.walk?.signals?.length && kv('Ampeln', `<span class="kvcol"><span>${S.walk.signals.length} auf der Route${S.walk.learned >= 1 ? ` · Ø +${Math.round(S.walk.learned)} s` : ''}</span><small>Wartezeiten lernt die App bei jeder Fahrt mit Routenführung (${S.walk.signals.filter(x => R.sig[x.id]).length} von ${S.walk.signals.length} gelernt)</small></span>`),
+    S.mode === 'car' && kv('Blitzer', `<span class="kvcol"><span>${S.walk?.cams?.length || 0} auf der Route</span><small>feste aus OpenStreetMap, mobile nur eigene Meldungen. Als Fahrer darfst du Blitzerwarnungen während der Fahrt nicht nutzen (§ 23 StVO).</small></span>`),
     S.live && kv('Gleislinien', railInfo()),
     liveError && kv('Technik', `<small class="tech">${liveError.replace(/</g, '&lt;')}</small>`),
   ].filter(Boolean).join('');
@@ -597,7 +694,7 @@ function railInfo() {
 }
 function bindDetails() {
   const sb = $('strictbtn'); if (sb) sb.onclick = e => { e.stopPropagation(); S.strict = !S.strict; store.set('zr.strict', S.strict); S.sel = groupOf(S.sel) ? S.sel : pickDefault()?.tripId; selectTrip(S.sel, false); };
-  const m = $('modebtn'); if (m) m.onclick = e => { e.stopPropagation(); const k = Object.keys(MODES); S.mode = k[(k.indexOf(S.mode) + 1) % k.length]; store.set('zr.mode2', S.mode); loadWalk().then(render); };
+  const m = $('modebtn'); if (m) m.onclick = e => { e.stopPropagation(); const k = Object.keys(MODES); S.mode = k[(k.indexOf(S.mode) + 1) % k.length]; store.set('zr.mode2', S.mode); R.picked = false; loadWalk().then(render); };
 }
 
 // ---- Blatt mit drei Höhen (wie Apple Karten): klein · mittel · groß; ziehen oder tippen ----
@@ -708,6 +805,18 @@ function onFix(pos) {
   const r = S.nav && S.walk ? splitRoute(S.walk.coords, ll) : null;
   const off = r && r.off > 45;                       // von der Route abgekommen → neu berechnen
   if (r) { S.walkRemain = r.remaining; drawWalk(); }
+  // Ampeln lernen (nur Auto, nur auf der Route): Halt vor der Ampel → Wartezeit und Grün-Zeitpunkt
+  const tNow = pos.timestamp || Date.now();
+  if (r && r.off < 30) {
+    R.along = r.along;
+    if (S.mode === 'car' && S.walk.signals?.length) {
+      const speed = pos.coords.speed ?? (R.lastFix ? dist(R.lastFix.ll, ll) / Math.max(0.5, (tNow - R.lastFix.t) / 1000) : 0);
+      const obs = R.learner.feed({ t: tNow, along: r.along, speed }, S.walk.signals);
+      if (obs.length) { obs.forEach(o => recordSignal(R.sig, o)); store.set('zr.signals.v1', R.sig); }
+    }
+    updateAhead();
+  }
+  R.lastFix = { ll, t: tNow };
   // Punkt gleitet zur neuen Position; in der Navigation auf die Route eingerastet (wie Navi-Apps)
   const target = r && r.off < 25 ? r.rest[0] : ll, now = performance.now();
   S.meAnim = { from: S.meShown || target, to: target, t0: now, dur: Math.min(1500, Math.max(400, now - (S.meAnim?.t0 ?? now - 1000))) };
@@ -841,6 +950,8 @@ function syncTrainLook() {
   map.triggerRepaint();
 }
 map.on('zoom', syncTrainLook);
+const zoomClass = () => document.body.classList.toggle('zfar', map.getZoom() < 11.5);
+map.on('zoom', zoomClass); zoomClass();
 
 function tick() {
   if (document.hidden && !S.nav) return; // Akku schonen, wenn die Seite nicht sichtbar ist
@@ -879,18 +990,23 @@ const setD3 = () => { const b = $('d3'); b.classList.toggle('on', S.d3); b.inner
 $('d3').onclick = () => { S.d3 = !S.d3; store.set('zr.3d', S.d3); setD3(); syncTrainLook(); map.easeTo({ pitch: S.d3 ? 55 : 0, bearing: S.d3 ? map.getBearing() : 0, duration: 700 }); setTimeout(layout, 750); };
 setD3();
 $('refresh').onclick = refresh;
+$('traf').onclick = () => { R.overlay = !R.overlay; store.set('zr.traffic', R.overlay); setOverlay(); };
 $('fit').onclick = () => { S.fitFull = !S.fitFull; $('fit').title = S.fitFull ? 'Näher heran' : 'Ganze Strecke'; fitAll(); };
 
 (async () => {
   render(); // Ladezustand sofort zeigen
   await loadHome();
   await Promise.all([refresh(), loadWalk()]); placeBase();
+  loadRoadData(); setInterval(loadRoadData, 120000);
+  api.trafficStatus().then(s => { R.provider = s.provider; $('traf').hidden = !s.provider; setOverlay(); }).catch(() => {});
   if (!S.sel || !S.deps.find(d => d.tripId === S.sel) || true) { const d = pickDefault(); if (d && d.tripId !== S.sel) await selectTrip(d.tripId, false); }
   render(); fitAll();
 })();
 if (S.track) navigator.permissions?.query({ name: 'geolocation' }).then(r => { if (r.state === 'granted') startTracking(); }).catch(() => {});
 if (location.hash === '#debug') Object.assign(window, { __map: map, __S: S, __t3d: train3d, __layout: layout, __select: selectTrip, __render: render });
 setInterval(tick, 1000);
+// in der Routenführung: Hinweise jede Sekunde nachführen, Live-Verkehr alle 3 Minuten neu holen
+setInterval(() => { if (!S.nav) return; updateAhead(); if (R.traffic && Date.now() - S.lastRoute.t > 180000 && S.me) { R.picked = true; loadWalk().then(render); } }, 1000);
 // alle 8 s: fragt mehr an, als das Bahn-Kontingent hergibt; der Worker schöpft die 60 pro Minute aus und liefert sonst den letzten Stand
 setInterval(() => { if (!document.hidden) refresh().then(logObservation); }, 8000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });

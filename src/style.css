@@ -175,3 +175,22 @@ body.nav .dirctl,body.nav .status{display:none}
 .bpast{margin-bottom:6px;padding-bottom:6px;border-bottom:.5px solid var(--sep)}
 .bsep{padding:0 10px 2px;font-size:12px}
 .brow.gone{opacity:.5}.brow.gone.sel{opacity:.8}
+
+/* Straße: Routenwahl, Ampeln, Blitzer, Meldungen */
+.rchips{display:flex;gap:8px;overflow-x:auto;margin-top:10px;padding-bottom:2px;scrollbar-width:none}.rchips::-webkit-scrollbar{display:none}
+.rchip{flex:1 0 46%;min-width:0;text-align:left;padding:8px 12px;border-radius:14px;background:var(--fill);display:flex;flex-direction:column;gap:1px;border:1.5px solid transparent}
+.rchip.sel{border-color:var(--blue);background:color-mix(in srgb,var(--blue) 14%,transparent)}
+.rchip b{font-size:16px;letter-spacing:-.02em}.rchip small{font-size:11.5px;color:var(--mute);line-height:1.25}
+.rinfo{margin-top:10px;padding:0 4px}
+.navrow{display:flex;gap:8px}.navrow .navbtn{flex:1}
+.navbtn.ghost{background:var(--fill);color:var(--ink);font-size:15px}
+.ahead{margin-top:4px;line-height:1.5}.ahead:empty{display:none}.ahead .ic{vertical-align:-3px}.ahead small{opacity:.8}
+.sig{width:9px;height:21px;border-radius:5px;background:#1d1d1f;border:1.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);display:flex;flex-direction:column;align-items:center;justify-content:space-evenly;pointer-events:none}
+.sig i{width:4px;height:4px;border-radius:50%;background:#ff453a}.sig i:nth-child(2){background:#ffd60a}.sig i:nth-child(3){background:#30d158}
+.cam,.inc{display:flex;align-items:center;gap:3px;padding:3px 6px;border-radius:9px;background:#ff9f0a;color:#1d1d1f;font-size:11px;font-weight:700;border:1.5px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);cursor:pointer}
+.cam .ic,.inc .ic{width:14px;height:14px}.cam.rep{background:#ffd60a;border-style:dashed}
+.inc{background:#fff;color:#c93400;padding:3px}.inc.closed{background:#ff3b30;color:#fff}
+body.zfar .sig{display:none}
+.fabs #traf{color:var(--mute)}.fabs #traf.on{color:var(--blue)}
+@media (prefers-color-scheme:dark){.sig{border-color:#48484a}.navbtn.ghost{color:var(--ink)}}
+.fabs button[hidden]{display:none}
